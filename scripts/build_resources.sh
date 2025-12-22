@@ -83,7 +83,7 @@ echo "Models are available in: model_files/smplx_models/"
 echo -e "\nDownloading face model checkpoint..."
 
 echo "Downloading face model to model_files/pretrained_cpt/face..."
-gdown "https://drive.google.com/file/d/1DSTL9rOBtrLN7w7YEf7kBSxDEAxFnw3t/view?usp=sharing" --fuzzy -O "./model_files/pretrained_cpt/face/epoch=29.ckpt"
+gdown "https://drive.google.com/file/d/14EDHEWdzfOGaae5SyqAXZ5-kGzdyimAQ/view?usp=sharing" --fuzzy -O "./model_files/pretrained_cpt/face/face.ckpt"
 
 echo "Face model download completed!"
 echo "Model is available in: model_files/pretrained_cpt/face/"

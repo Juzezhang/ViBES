@@ -15,7 +15,6 @@ test_output
 training
 ViBES-Face
 
-
 datasets/
 # OS specific
 .DS_Store
