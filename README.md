@@ -60,7 +60,6 @@ chmod +x ./preprocess/patch_chumpy_numpy2.sh
 # Build resources
 ./scripts/build_resources.sh
 
-
 # Download our pretrained model
 huggingface-cli download JuzeZhang/ViBES-Face --local-dir ./ViBES-Face
 ```
@@ -80,10 +79,7 @@ python inference/inference_a2m_face.py --user_text "If you had a superpower for 
 
 Demo output
 
-<video width="250" height="250" controls>
-  <source src="./assets/response_face.mp4" type="video/mp4">
-  Your browser does not support the video tag.
-</video>
+https://github.com/user-attachments/assets/cd0191fa-394d-4476-aec7-c8aed7fe1690
 
 *Example output showing conversational facial animation with synchronized audio*
 
