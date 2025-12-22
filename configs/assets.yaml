@@ -6,13 +6,10 @@ TEST:
 
 DATASET:
   # TASK_ROOT: models/mGPT_instructions
-  SMPL_PATH: ../language_of_motion/models/smpl_models
-  TRANSFORM_PATH: ../language_of_motion/models/transforms/
-  WORD_VERTILIZER_PATH: ../language_of_motion/models/t2m/glove/
-  # KIT:
-  #   ROOT: datasets/kit-ml # KIT directory
-  #   SPLIT_ROOT: datasets/kit-ml # KIT splits directory
-  #   MEAN_STD_PATH: models/t2m/
+  SMPL_PATH: ../language_of_motion/model_files/smplx_models
+  FLAME_PATH: ../language_of_motion/model_files/FLAME2020/
+  TRANSFORM_PATH: ../language_of_motion/model_files/transforms/
+  WORD_VERTILIZER_PATH: ../language_of_motion/model_files/t2m_evaluators/glove/
   HUMANML3D:
     ROOT: "/scr/juze/datasets/HumanML3D" # HumanML3D directory
     SPLIT_ROOT: "/scr/juze/datasets/HumanML3D" # HumanML3D splits directory
@@ -20,15 +17,27 @@ DATASET:
   BEAT2:
     ROOT: /scr/juze/datasets/BEAT2/beat_english_v2.0.0 # BEAT2 directory 
   AMASS:
-    ROOT: /scr/juze/datasets/AMASS # AMASS directory 
+    ROOT: /scr/juze/datasets/HumanML3D_25 # AMASS directory 
+  AMASS_talking:
+    ROOT: /scr/juze/datasets/AMASS_talking # AMASS_talking directory 
+  AMASS_P2P:
+    ROOT: /scr/juze/datasets/AMASS_p2p # AMASS_P2P directory 
   LIBRISPEECH:
     ROOT: "/scr/juze/datasets/LibriSpeech" # LibriSpeech directory  
+  CANDOR:
+    ROOT: "/simurgh/u/juze/datasets/CANDOR" # CANDOR directory  
+  TFHP:
+    ROOT: "/simurgh/u/juze/datasets/TFHP" # TFHP directory  
+  YouTube_Talking:
+    ROOT: "/simurgh/group/juze/datasets/YouTube_Talking" # YouTube_Talking directory  
+  YouTube_Talking_Synthetic:
+    ROOT: "/simurgh/group/juze/datasets/YouTube_Talking_Synthetic" # YouTube_Talking_Synthetic directory  
   BEAT2_AMASS:
     ROOT: /scr/juze/datasets/beat2_amass # BEAT2 directory
-    MEAN_STD_PATH: ../language_of_motion/models/t2m/
+    MEAN_STD_PATH: ../language_of_motion/model_files/t2m_evaluators/
 METRIC:
   TM2T:
-    t2m_path: ../language_of_motion/models/t2m/t2m/ # path for tm2t evaluator
+    t2m_path: ../language_of_motion/model_files/t2m_evaluators/t2m/ # path for tm2t evaluator
   CO_SPEECH:
     e_path: weights/AESKConv_240_100.bin
     # e_name: VAESKConv
@@ -43,14 +52,14 @@ METRIC:
       variational: False
       vae_quantizer_lambda: 1.0
       e_name: VAESKConv
-      data_path_1: ../language_of_motion/models/
+      data_path_1: ../language_of_motion/model_files/
 
 model:
-  whisper_path: ../language_of_motion/models/whisper-large-v2 # path for whisper model, webui only
+  whisper_path: ../language_of_motion/model_files/whisper-large-v2 # path for whisper model, webui only
 
 RENDER:
   BLENDER_PATH: /root/blender-2.93.18-linux-x64/blender
-  SMPL_MODEL_PATH: ../language_of_motion/models/smpl/smpl_models/smpl
-  SMPLX2020_MODEL_PATH: ../language_of_motion/models/smpl_models
-  MODEL_PATH: ../language_of_motion/models/smpl_models
-  FACES_PATH: ../language_of_motion/models/smplh/smplh.faces
+  SMPL_MODEL_PATH: ../language_of_motion/model_files/smpl/smpl_models/smpl
+  SMPLX2020_MODEL_PATH: ../language_of_motion/model_files/smpl_models
+  MODEL_PATH: ../language_of_motion/model_files/smpl_models
+  FACES_PATH: ../language_of_motion/model_files/smplh/smplh.faces

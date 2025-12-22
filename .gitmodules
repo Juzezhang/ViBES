@@ -1,0 +1,3 @@
+[submodule "speech_related/Matcha-TTS"]
+	path = speech_related/Matcha-TTS
+	url = https://github.com/shivammehta25/Matcha-TTS

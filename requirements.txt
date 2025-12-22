@@ -1,70 +1,64 @@
-# motiongpt
-numpy==1.23.1
-tensorboard
-pytorch_lightning
-torchmetrics
-omegaconf
-shortuuid
-chumpy
-transformers==4.42.4
-diffusers
-einops
-wandb
-rich
-matplotlib
+# Core dependencies
+# Note: PyTorch and PyTorch3D are installed separately:
+# - PyTorch: conda install pytorch==2.1.0 torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
+# - PyTorch3D: pip install "git+https://github.com/facebookresearch/pytorch3d.git@stable"
+# - NumPy: pip install numpy==1.26.4 (after PyTorch to avoid conflicts)
+# - Flash Attention: pip install flash-attn --no-build-isolation (after PyTorch)
 
-# for visualization
+# Deep learning frameworks
+pytorch-lightning==2.5.0
+torchmetrics==1.7.1
+transformers==4.48.3
+datasets==3.5.1
+
+# Configuration
+omegaconf==2.3.0
+yacs
+
+# Data processing
+numpy==1.26.4
+scipy==1.15.2
+pandas==2.2.3
+h5py==3.13.0
+einops==0.8.1
+safetensors==0.5.3
+
+# Training
+deepspeed==0.16.5; sys_platform == 'linux'
+
+# Audio processing
+librosa==0.11.0
+soundfile==0.13.1
+conformer==0.3.2
+diffusers==0.33.1
+
+# 3D and visualization
 smplx==0.1.28
-trimesh
-joblib==1.2.0
-h5py
-scikit-image
-spacy
-ftfy
-more-itertools
-natsort
-pyrender
-moviepy
-librosa
-triangle
+trimesh==4.6.8
+pyrender==0.1.45
+opencv-python==4.11.0.86
 
-# EMAGE
-ConfigArgParse
-fasttext
-h5py
-imageio
-ipython
-librosa
-lmdb
+# Video processing
+av==14.3.0
+
+# Utilities
+tqdm==4.67.1
+rich==14.0.0
+wandb==0.19.10
+
+# Optional: Install manually if needed
+# chumpy: pip install chumpy-fork (for newer Python versions) or pip install chumpy==0.70 --no-build-isolation
+# flash-attn: pip install flash-attn --no-build-isolation (requires PyTorch installed first)
+
+
+hyperpyyaml
+tiktoken
+spacy
+textgrid
 loguru
 matplotlib
-moviepy
-gradio
-fasttext-wheel
-opencv_contrib_python
-opencv_python
-pandas
-peakutils
-ptflops
-python_igraph
-pyvirtualdisplay
-PyYAML
-replicate
-scikit_learn
-scipy
-soundfile
-termcolor
-textgrid
-tqdm
-trimesh
-wandb
-pyglet
-smplx
-tensorboard
-#pyrender
-bert_score
-jiwer
-
-
-
-turbot5
+IPython
+hydra-core
+lightning
+gdown
+wget

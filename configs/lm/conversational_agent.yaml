@@ -1,4 +1,4 @@
-target: Conver_Agent.archs.conversational_agent.MLM
+target: conver_agent.archs.conversational_agent.MLM
 params:
   model_type: llama
   model_path: ./models/meta-llama/Llama-3.1-8B-Instruct

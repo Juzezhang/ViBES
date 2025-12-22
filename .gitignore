@@ -1,4 +1,21 @@
 .vscode/
+configs/
+evaluation
+inference/mics
+inference/inference_a2m_body.py
+inference/inference_expertnum2_a2m_body_bk.py
+mics/
+model_files/
+model_files_bk
 models/
-results/
-experiments/
+paper_result
+preprocess
+speech_related
+test_output
+training
+ViBES-Face
+
+
+datasets/
+# OS specific
+.DS_Store

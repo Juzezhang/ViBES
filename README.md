@@ -61,7 +61,8 @@ chmod +x ./preprocess/patch_chumpy_numpy2.sh
 ./scripts/build_resources.sh
 
 
-
+# Download our pretrained model
+huggingface-cli download JuzeZhang/ViBES-Face --local-dir ./ViBES-Face
 ```
 
 **Notes:**

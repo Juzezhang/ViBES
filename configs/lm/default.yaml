@@ -1,7 +1,7 @@
-target: lom.archs.lom.MLM
+target: conver_agent.archs.lom.MLM
 params:
   model_type: t5
-  model_path: ./models/flan-t5-base
+  model_path: /simurgh/u/juze/code/language_of_motion/model_files/t5_models/flan-t5-base
   stage: ${TRAIN.STAGE}
   motion_codebook_size: ${model.params.codebook_size}
   ablation: ${ABLATION}
