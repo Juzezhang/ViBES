@@ -51,8 +51,8 @@ pip install -U flash-attn --no-build-isolation
 
 # Install Chumpy and apply patch
 pip install "chumpy==0.70" --no-build-isolation
-chmod +x ./preprocess/patch_chumpy_numpy2.sh
-./preprocess/patch_chumpy_numpy2.sh
+chmod +x ./scripts/patch_chumpy_numpy2.sh
+./scripts/patch_chumpy_numpy2.sh
 
 # Download GLM-4-Voice components
 ./scripts/download_glm4voice_modules.sh
