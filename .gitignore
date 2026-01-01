@@ -1,5 +1,7 @@
 .vscode/
-configs/
+configs/lm
+configs/mics
+
 evaluation
 inference/mics
 inference/inference_a2m_body.py
@@ -10,7 +12,10 @@ model_files_bk
 models/
 paper_result
 preprocess
-speech_related
+speech_related/cosyvoice
+speech_related/glm-4-voice-decoder
+speech_related/Matcha-TTS
+speech_related/speech_tokenizer
 test_output
 training
 ViBES-Face

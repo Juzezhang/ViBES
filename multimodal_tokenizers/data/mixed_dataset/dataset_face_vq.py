@@ -13,7 +13,7 @@ from .data_tools import (
     JOINT_MASK_FACE,
     BEAT_SMPLX_FACE,
 )
-from conver_agent.utils.rotation_conversions import axis_angle_to_6d, axis_angle_to_matrix, rotation_6d_to_axis_angle, axis_angle_to_6d_np
+from multimodal_tokenizers.utils.rotation_conversions import axis_angle_to_6d, axis_angle_to_matrix, rotation_6d_to_axis_angle, axis_angle_to_6d_np
 import pandas as pd
 import codecs as cs
 

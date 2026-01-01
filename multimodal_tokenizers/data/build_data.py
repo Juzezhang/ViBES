@@ -1,6 +1,6 @@
 from omegaconf import OmegaConf
 from os.path import join as pjoin
-from conver_agent.config import instantiate_from_config
+from multimodal_tokenizers.config import instantiate_from_config
 
 
 def build_data(cfg, phase="train"):
@@ -11,5 +11,5 @@ def build_data(cfg, phase="train"):
     elif isinstance(data_config['target'], list):
         data_config_tmp = data_config.copy()
         data_config_tmp['params']['dataModules'] = data_config['target']
-        data_config_tmp['target'] = 'lom.data.Concat.ConcatDataModule'
+        data_config_tmp['target'] = 'multimodal_tokenizers.data.Concat.ConcatDataModule'
         return instantiate_from_config(data_config)

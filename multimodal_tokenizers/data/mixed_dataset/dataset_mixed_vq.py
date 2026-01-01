@@ -18,7 +18,7 @@ import smplx
 from tqdm import tqdm
 from .data_tools import joints_list
 from smplx import FLAME
-from conver_agent.data.mixed_dataset.data_tools import (
+from multimodal_tokenizers.data.mixed_dataset.data_tools import (
     joints_list, 
     JOINT_MASK_FACE,
     JOINT_MASK_UPPER,
@@ -32,7 +32,7 @@ from conver_agent.data.mixed_dataset.data_tools import (
     BEAT_SMPLX_HANDS,
     BEAT_SMPLX_LOWER
 )
-from conver_agent.utils.rotation_conversions import axis_angle_to_6d, axis_angle_to_matrix, rotation_6d_to_axis_angle, axis_angle_to_6d_np
+from multimodal_tokenizers.utils.rotation_conversions import axis_angle_to_6d, axis_angle_to_matrix, rotation_6d_to_axis_angle, axis_angle_to_6d_np
 
 class MixedDatasetVQ(data.Dataset):
     def __init__(

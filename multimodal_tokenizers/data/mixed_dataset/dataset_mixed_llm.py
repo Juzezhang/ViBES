@@ -16,7 +16,7 @@ from .utils.split_transcript import split_and_merge_sentences
 import librosa
 from numpy.lib import stride_tricks
 from pathlib import Path
-from conver_agent.utils.token_utils import prepare_multimodal_tokens_for_lm, combine_audio_face_tokens
+from multimodal_tokenizers.utils.token_utils import prepare_multimodal_tokens_for_lm, combine_audio_face_tokens
 
 class MixedDatasetLLM(data.Dataset):
     def __init__(

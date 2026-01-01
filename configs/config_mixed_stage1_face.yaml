@@ -1,0 +1,117 @@
+NAME: VQVAE_Mixed_Face  # Experiment names
+ACCELERATOR: 'gpu' # Devices optioncal: "cpu", "gpu", "tpu", "ipu", "hpu", "mps, "auto"
+NUM_NODES: 1 # Number of GPU nodes for distributed training
+DEVICE: [0] # Index of gpus eg. [0] or [0,1,2,3]
+
+Selected_type: separate_rot  # defaut separate_rot
+Representation_type:
+  separate_rot:
+    face:
+      ori: beat_smplx_joints
+      tar: beat_smplx_face_head
+      vae_test_dim: 112  # 6D head + 6D jaw + 100 expression
+
+TRAIN:
+  #---------------------------------
+  STAGE: vq # stage "vae", "vq" , "lm_pretrain", "lm_instruct"  similar to motiongpt
+  #---------------------------------
+  NUM_WORKERS: 16 # Number of workers
+  BATCH_SIZE: 128 # Size of batches - reduced from 64
+  END_EPOCH: 999999 # End epoch
+  RESUME: '' # Resume training from this path
+  # PRETRAINED: '/simurgh/u/juze/code/conversational_agent/experiments/conversational_agent/VQVAE_Mixed_Face_Only_512_DS1_Dim_512_wo_meshloss/checkpoints/epoch=79.ckpt' # Preatrained model path
+  PRETRAINED_VQ: '' # Preatrained model path
+  PRECISION: 32
+  FORCE_BF16: false
+  Loss_6D: False
+  Loss_mesh: False
+  OPTIM:
+    target: Adam
+    params:
+      lr: 1e-4
+      weight_decay: 0.0
+
+# Evaluating Configuration
+EVAL:
+  BATCH_SIZE: 128 # Evaluating Batch size
+  SPLIT: test
+
+TEST:
+  CHECKPOINTS: ''
+  SPLIT: test
+  BATCH_SIZE: 1 # training Batch size
+
+DATASET:
+  vary_length: False
+  pose_fps: 25
+  unit_length: 4
+  pre_frames: 4
+  audio_fps: 16000
+  audio_down: 640
+  motion_representation: ${Selected_type}
+  target: multimodal_tokenizers.data.MixedDataset.MixedDataModule
+  FLAME_PATH: "./model_files/FLAME2020/"
+  datasets:
+    - name: "BEAT2"
+      code_path_audio: "audios_token_25hz"
+      stride: 20
+      pose_length: 64
+      pose_fps: 25
+      training_speakers: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30]
+      testing_speakers: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30]
+      additional_data: True # True or False
+      pose_rep: smplxflame_25
+    - name: "CANDOR"
+      pose_length: 64
+      stride: 20
+    - name: "TFHP"
+      pose_length: 64
+      stride: 20
+    - name: "YouTube_Talking"
+      pose_length: 64
+      stride: 20
+    - name: "YouTube_Talking_Synthetic"
+      pose_length: 64
+      stride: 20
+
+
+METRIC:
+  TYPE: ['RotationMetrics']
+
+LOSS:
+  LAMBDA_FEATURE: 1.0
+  LAMBDA_VELOCITY: 0.5
+  LAMBDA_COMMIT: 0.02
+  LAMBDA_CLS: 1.0
+  ABLATION:
+    RECONS_LOSS: 'l1_smooth'
+
+model:
+  target: conver_agent.models.conversational_agent.Conversational_Agent
+  params:
+    condition: 'text'
+    task: 't2m'
+    # lm: ${lm.default}  # Commented out as not needed for vq stage
+    modality_setup:
+      params:
+        audio_fps: ${DATASET.audio_fps}
+        audio_down: ${DATASET.audio_down}
+        motion_fps: ${DATASET.pose_fps}
+        motion_down: ${DATASET.unit_length}
+        
+    modality_tokenizer:
+      vae_face:
+        target: conver_agent.archs.lom_vq.VQVAEConvZeroDSUS1_PaperVersion
+        params:
+          vae_layer: 3
+          code_num: 512
+          codebook_size: 512
+          vae_quantizer_lambda: 1
+          vae_test_dim: ${Representation_type.${Selected_type}.face.vae_test_dim}  #dynamic
+
+LOGGER:
+  TYPE: ['wandb']
+  VAL_EVERY_STEPS: 5
+  WANDB:
+    params:
+      project: conversational_agent
