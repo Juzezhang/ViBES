@@ -1,7 +1,8 @@
 .vscode/
+configs
 configs/lm
 configs/mics
-
+experiments
 evaluation
 inference/mics
 inference/inference_a2m_body.py
