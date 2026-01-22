@@ -1221,6 +1221,7 @@ class GlobalVQDataset(data.Dataset):
             "split_name": "vae",
             "select_part": "global",
             "motion_len": motion_len,
+            "collate_key": "vae_global",
         })
         
         return formatted_data

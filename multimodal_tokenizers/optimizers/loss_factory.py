@@ -2,22 +2,22 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 import numpy as np
-from conver_agent.utils.rotation_conversions import rotation_6d_to_matrix, rotation_6d_to_axis_angle, matrix_to_axis_angle
-from conver_agent.utils.other_tools import velocity2position, estimate_linear_velocity
-from conver_agent.data.mixed_dataset.data_tools import (
-    joints_list, 
-    JOINT_MASK_FACE,
-    JOINT_MASK_UPPER,
-    JOINT_MASK_HANDS,
-    JOINT_MASK_LOWER,
-    JOINT_MASK_FULL,
-    BEAT_SMPLX_JOINTS,
-    BEAT_SMPLX_FULL,
-    BEAT_SMPLX_FACE,
-    BEAT_SMPLX_UPPER,
-    BEAT_SMPLX_HANDS,
-    BEAT_SMPLX_LOWER
-)
+from multimodal_tokenizers.utils.rotation_conversions import rotation_6d_to_matrix, rotation_6d_to_axis_angle, matrix_to_axis_angle
+from multimodal_tokenizers.utils.other_tools import velocity2position, estimate_linear_velocity
+# from conver_agent.data.mixed_dataset.data_tools import (
+#     joints_list, 
+#     JOINT_MASK_FACE,
+#     JOINT_MASK_UPPER,
+#     JOINT_MASK_HANDS,
+#     JOINT_MASK_LOWER,
+#     JOINT_MASK_FULL,
+#     BEAT_SMPLX_JOINTS,
+#     BEAT_SMPLX_FULL,
+#     BEAT_SMPLX_FACE,
+#     BEAT_SMPLX_UPPER,
+#     BEAT_SMPLX_HANDS,
+#     BEAT_SMPLX_LOWER
+# )
 
 class GeodesicLoss(nn.Module):
     def __init__(self):

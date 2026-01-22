@@ -5,25 +5,27 @@ TEST:
   FOLDER: results # Testing files saving path
 
 DATASET:
-  # TASK_ROOT: models/mGPT_instructions
-  SMPL_PATH: ../language_of_motion/model_files/smplx_models
-  FLAME_PATH: ../language_of_motion/model_files/FLAME2020/
-  TRANSFORM_PATH: ../language_of_motion/model_files/transforms/
-  WORD_VERTILIZER_PATH: ../language_of_motion/model_files/t2m_evaluators/glove/
+  MODEL_FILES_DIR: ./model_files
+  SMPLX_MODEL_DIR: ${DATASET.MODEL_FILES_DIR}/smplx_models
+  FLAME_MODEL_DIR: ${DATASET.MODEL_FILES_DIR}/FLAME2020
+  SMPL_MODEL_DIR: ${DATASET.MODEL_FILES_DIR}/smpl_models
+  SMPLH_FACES_PATH: ${DATASET.MODEL_FILES_DIR}/smplh/smplh.faces
+  TRANSFORM_PATH: ${DATASET.MODEL_FILES_DIR}/transforms/
+  WORD_VERTILIZER_PATH: ${DATASET.MODEL_FILES_DIR}/t2m_evaluators/glove/
   HUMANML3D:
-    ROOT: "/scr/juze/datasets/HumanML3D" # HumanML3D directory
-    SPLIT_ROOT: "/scr/juze/datasets/HumanML3D" # HumanML3D splits directory
+    ROOT: "/simurgh2/datasets/HumanML3D" # HumanML3D directory
+    SPLIT_ROOT: "/simurgh2/datasets/HumanML3D" # HumanML3D splits directory
     MEAN_STD_PATH: models/t2m/
   BEAT2:
-    ROOT: /scr/juze/datasets/BEAT2/beat_english_v2.0.0 # BEAT2 directory 
+    ROOT: /simurgh2/datasets/BEAT2/beat_english_v2.0.0 # BEAT2 directory 
   AMASS:
-    ROOT: /scr/juze/datasets/HumanML3D_25 # AMASS directory 
+    ROOT: /simurgh2/datasets/HumanML3D_25 # AMASS directory 
   AMASS_talking:
-    ROOT: /scr/juze/datasets/AMASS_talking # AMASS_talking directory 
+    ROOT: /simurgh2/datasets/AMASS_talking # AMASS_talking directory 
   AMASS_P2P:
-    ROOT: /scr/juze/datasets/AMASS_p2p # AMASS_P2P directory 
+    ROOT: /simurgh2/datasets/AMASS_p2p # AMASS_P2P directory 
   LIBRISPEECH:
-    ROOT: "/scr/juze/datasets/LibriSpeech" # LibriSpeech directory  
+    ROOT: "/simurgh2/datasets/LibriSpeech" # LibriSpeech directory  
   CANDOR:
     ROOT: "/simurgh/u/juze/datasets/CANDOR" # CANDOR directory  
   TFHP:
@@ -32,15 +34,12 @@ DATASET:
     ROOT: "/simurgh/group/juze/datasets/YouTube_Talking" # YouTube_Talking directory  
   YouTube_Talking_Synthetic:
     ROOT: "/simurgh/group/juze/datasets/YouTube_Talking_Synthetic" # YouTube_Talking_Synthetic directory  
-  BEAT2_AMASS:
-    ROOT: /scr/juze/datasets/beat2_amass # BEAT2 directory
-    MEAN_STD_PATH: ../language_of_motion/model_files/t2m_evaluators/
+
 METRIC:
   TM2T:
     t2m_path: ../language_of_motion/model_files/t2m_evaluators/t2m/ # path for tm2t evaluator
   CO_SPEECH:
     e_path: weights/AESKConv_240_100.bin
-    # e_name: VAESKConv
     params:
       vae_test_len: 32
       vae_test_dim: 330
@@ -52,14 +51,13 @@ METRIC:
       variational: False
       vae_quantizer_lambda: 1.0
       e_name: VAESKConv
-      data_path_1: ../language_of_motion/model_files/
+      data_path_1: ${DATASET.MODEL_FILES_DIR}/
 
-model:
-  whisper_path: ../language_of_motion/model_files/whisper-large-v2 # path for whisper model, webui only
+# model:
+#   whisper_path: ../language_of_motion/model_files/whisper-large-v2 # path for whisper model, webui only
 
 RENDER:
   BLENDER_PATH: /root/blender-2.93.18-linux-x64/blender
-  SMPL_MODEL_PATH: ../language_of_motion/model_files/smpl/smpl_models/smpl
-  SMPLX2020_MODEL_PATH: ../language_of_motion/model_files/smpl_models
-  MODEL_PATH: ../language_of_motion/model_files/smpl_models
-  FACES_PATH: ../language_of_motion/model_files/smplh/smplh.faces
+  SMPL_MODEL_DIR: ${DATASET.SMPL_MODEL_DIR}
+  SMPLX_MODEL_DIR: ${DATASET.SMPLX_MODEL_DIR}
+  SMPLH_FACES_PATH: ${DATASET.SMPLH_FACES_PATH}

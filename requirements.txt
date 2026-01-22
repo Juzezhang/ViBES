@@ -50,7 +50,6 @@ wandb==0.19.10
 # chumpy: pip install chumpy-fork (for newer Python versions) or pip install chumpy==0.70 --no-build-isolation
 # flash-attn: pip install flash-attn --no-build-isolation (requires PyTorch installed first)
 
-
 hyperpyyaml
 tiktoken
 spacy
@@ -62,3 +61,6 @@ hydra-core
 lightning
 gdown
 wget
+
+
+fasttext

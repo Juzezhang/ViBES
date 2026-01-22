@@ -152,7 +152,10 @@ FLAME_BATCH_SIZE_VISUALIZE = 100  # Batch size for FLAME visualization
 VAE_CHECKPOINT_FACE = os.path.join(CONVERSATIONAL_AGENT_DIR, 'model_files/pretrained_cpt/face/face.ckpt')
 
 # FLAME model path
-FLAME_MODEL_DIR = os.path.join(ROOT_DIR, "model_files/FLAME2020")
+FLAME_MODEL_DIR = os.environ.get(
+    "VIBES_FLAME_MODEL_DIR",
+    os.path.join(ROOT_DIR, "model_files", "FLAME2020"),
+)
 
 # Audio decoder paths
 AUDIO_DECODER_CONFIG = os.path.join(ROOT_DIR, "speech_related", "glm-4-voice-decoder", "config.yaml")

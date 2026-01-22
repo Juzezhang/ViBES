@@ -13,11 +13,11 @@ import pandas as pd
 import math
 import textgrid as tg
 import h5py
-from .utils.split_transcript import split_and_merge_sentences
+# from .utils.split_transcript import split_and_merge_sentences
 import smplx
 from tqdm import tqdm
-from .data_tools import joints_list
-from smplx import FLAME
+# from .data_tools import joints_list
+# from smplx import FLAME
 from multimodal_tokenizers.data.mixed_dataset.data_tools import (
     joints_list, 
     JOINT_MASK_FACE,
@@ -1289,7 +1289,7 @@ class MixedDatasetVQ(data.Dataset):
         # We need to process data from scratch, so initialize SMPLX if needed
         self._initialize_smplx_if_needed()
         
-        print(f"Processing AMASS dataset...")
+        print(f"Processing AMASS_talking dataset...")
         
         self.data_root_amass = data_root
         pose_fps_amass = config.pose_fps
@@ -1486,7 +1486,15 @@ class MixedDatasetVQ(data.Dataset):
         data_root = self.args["AMASS_talking"].ROOT
         cache_path = self._get_cache_path(data_root, "AMASS_talking")
         pose_rep = config.pose_rep
-        pose_rep_face = config.pose_rep_face
+        pose_rep_face = getattr(config, "pose_rep_face", None)
+        modalities_cfg = getattr(self.args, "MODALITIES", None)
+        expect_face = True
+        if modalities_cfg is not None:
+            dataset_modalities = modalities_cfg.get("AMASS_talking")
+            if dataset_modalities is not None:
+                expect_face = "face" in {str(modality).lower() for modality in dataset_modalities}
+        if not expect_face:
+            pose_rep_face = None
         foot_contact_path = config.foot_contact_path
         # Check if we should load from cache
         data_dict, metadata = self._load_from_cache(cache_path, "AMASS_talking")
@@ -1498,7 +1506,7 @@ class MixedDatasetVQ(data.Dataset):
         # We need to process data from scratch, so initialize SMPLX if needed
         self._initialize_smplx_if_needed()
         
-        print(f"Processing AMASS dataset...")
+        print(f"Processing AMASS_talking dataset...")
         
         self.data_root_amass = data_root
         pose_fps_amass = config.pose_fps
@@ -1535,19 +1543,40 @@ class MixedDatasetVQ(data.Dataset):
         ##################  AMASS  ##################
         # Process each file
         # for index, file_name in tqdm(split_file.iterrows()):
+        loaded_samples = 0
+        missing_pose = 0
+        missing_face = 0
+        error_count = 0
         for index, file_name in tqdm(enumerate(id_list_amass)):
             try:
 
                 pose_file = pjoin(self.data_root_amass, pose_rep, file_name+'.npz')
+                if not os.path.exists(pose_file):
+                    missing_pose += 1
+                    if missing_pose <= 3:
+                        print(f"Missing pose file: {pose_file}")
+                    continue
                 pose_data = np.load(pose_file, allow_pickle=True)
 
-                flame_path = pjoin(self.data_root_amass, pose_rep_face, file_name + '.npz')
-                flame_data = np.load(flame_path)
-                # Extract expression and pose parameters
-                face_expressions = flame_data['exp']  # Shape: [n_frames, 50]
-                face_pose = flame_data['pose']        # Shape: [n_frames, 6] (global + jaw)
-                face_shape = flame_data['shape']      # Shape: [n_frames, 100/300] (betas)
-                n_face, c_face = face_expressions.shape[0], face_expressions.shape[1]
+                face_available = False
+                face_expressions = None
+                face_pose = None
+                tar_pose_face = None
+                tar_pose_face_with_head = None
+                if pose_rep_face:
+                    flame_path = pjoin(self.data_root_amass, pose_rep_face, file_name + '.npz')
+                    face_available = os.path.exists(flame_path)
+                    if not face_available:
+                        missing_face += 1
+                        if missing_face <= 3:
+                            print(f"Missing face file: {flame_path}")
+                    else:
+                        flame_data = np.load(flame_path)
+                        # Extract expression and pose parameters
+                        face_expressions = flame_data['exp']  # Shape: [n_frames, 50]
+                        face_pose = flame_data['pose']        # Shape: [n_frames, 6] (global + jaw)
+                        face_shape = flame_data['shape']      # Shape: [n_frames, 100/300] (betas)
+                        n_face, c_face = face_expressions.shape[0], face_expressions.shape[1]
 
                 # Process pose data
                 poses = pose_data["poses"]
@@ -1582,24 +1611,25 @@ class MixedDatasetVQ(data.Dataset):
                 # tar_pose_face = np.zeros((n, 106))
                 # tar_pose_face_with_head = np.zeros((n, 112))
 
-                # Process head pose (positions 0:3 in pose)
-                head_pose = face_pose[:, :3]  # Global head orientation in axis-angle
-                head_pose_6d = axis_angle_to_6d_np(head_pose).reshape(n_face, 6)
-                # Process jaw pose (positions 3:6 in pose)
-                jaw_pose = face_pose[:, 3:6]  # Jaw rotation in axis-angle
-                jaw_pose_6d = axis_angle_to_6d_np(jaw_pose).reshape(n_face, 6)
-                
-                # Pad expressions to 100 dimensions as needed
-                if face_expressions.shape[1] < 100:
-                    padded_exps = np.zeros((n_face, 100), dtype=face_expressions.dtype)
-                    padded_exps[:, :face_expressions.shape[1]] = face_expressions
-                    face_expressions = padded_exps
-                elif face_expressions.shape[1] > 100:
-                    face_expressions = face_expressions[:, :100]
-                
-                # Concatenate head pose, jaw pose and expressions for 112D face representation
-                tar_pose_face = np.concatenate([jaw_pose_6d, face_expressions], axis=1)
-                tar_pose_face_with_head = np.concatenate([head_pose_6d, jaw_pose_6d, face_expressions], axis=1)
+                if face_available:
+                    # Process head pose (positions 0:3 in pose)
+                    head_pose = face_pose[:, :3]  # Global head orientation in axis-angle
+                    head_pose_6d = axis_angle_to_6d_np(head_pose).reshape(n_face, 6)
+                    # Process jaw pose (positions 3:6 in pose)
+                    jaw_pose = face_pose[:, 3:6]  # Jaw rotation in axis-angle
+                    jaw_pose_6d = axis_angle_to_6d_np(jaw_pose).reshape(n_face, 6)
+                    
+                    # Pad expressions to 100 dimensions as needed
+                    if face_expressions.shape[1] < 100:
+                        padded_exps = np.zeros((n_face, 100), dtype=face_expressions.dtype)
+                        padded_exps[:, :face_expressions.shape[1]] = face_expressions
+                        face_expressions = padded_exps
+                    elif face_expressions.shape[1] > 100:
+                        face_expressions = face_expressions[:, :100]
+                    
+                    # Concatenate head pose, jaw pose and expressions for 112D face representation
+                    tar_pose_face = np.concatenate([jaw_pose_6d, face_expressions], axis=1)
+                    tar_pose_face_with_head = np.concatenate([head_pose_6d, jaw_pose_6d, face_expressions], axis=1)
                 
                 # Extract and convert hand pose data
                 tar_pose_hands_6d = np.zeros((n, 180))
@@ -1636,9 +1666,7 @@ class MixedDatasetVQ(data.Dataset):
                     sample_shape = betas[:]
                     new_name = 'amass_' + '%s' % (file_name)
                     # Store processed data
-                    self.data_dict_amass_talking[new_name] = {
-                        'face': tar_pose_face,
-                        'face_with_head': tar_pose_face_with_head,
+                    sample_dict = {
                         'hand': sample_hand,
                         'upper': sample_upper,
                         'lower': sample_lower,
@@ -1648,7 +1676,12 @@ class MixedDatasetVQ(data.Dataset):
                         'id': file_name,
                         'dataset_name': 'amass_talking',
                     }
+                    if face_available:
+                        sample_dict['face'] = tar_pose_face
+                        sample_dict['face_with_head'] = tar_pose_face_with_head
+                    self.data_dict_amass_talking[new_name] = sample_dict
                     self.metadata_amass_talking.append(new_name)
+                    loaded_samples += 1
                 else:
                     stride = int(config.stride)
                     cut_length = int(self.ori_length)
@@ -1676,11 +1709,7 @@ class MixedDatasetVQ(data.Dataset):
                         new_name = 'amass_' + '%s_%d' % (file_name, i)
 
                         # Store processed data
-                        self.data_dict_amass_talking[new_name] = {
-                            # 'face': sample_face,
-                            # 'face_with_head': sample_face_with_head,
-                            'face': tar_pose_face,
-                            'face_with_head': tar_pose_face_with_head,
+                        sample_dict = {
                             'hand': sample_hand,
                             'upper': sample_upper,
                             'lower': sample_lower,
@@ -1690,9 +1719,16 @@ class MixedDatasetVQ(data.Dataset):
                             'id': file_name,
                             'dataset_name': 'amass_talking',
                         }
+                        if face_available:
+                            sample_dict['face'] = tar_pose_face
+                            sample_dict['face_with_head'] = tar_pose_face_with_head
+                        self.data_dict_amass_talking[new_name] = sample_dict
                         self.metadata_amass_talking.append(new_name)
+                        loaded_samples += 1
             except Exception as e:
-                # print(f"Error processing file {f_name}: {str(e)}")
+                error_count += 1
+                if error_count <= 3:
+                    print(f"Error processing AMASS_talking {file_name}: {e}")
                 continue
 
             # For fast debug
@@ -1701,6 +1737,11 @@ class MixedDatasetVQ(data.Dataset):
         
         # Save processed data to cache
         self._save_to_cache(cache_path, self.data_dict_amass_talking, self.metadata_amass_talking, "AMASS_talking")
+        if loaded_samples == 0:
+            print(
+                "No AMASS_talking samples loaded. "
+                f"Check ROOT={data_root}, pose_rep={pose_rep}, pose_rep_face={pose_rep_face}"
+            )
 
 
     def _load_amass_p2p(self, config):
@@ -2030,6 +2071,27 @@ class MixedDatasetVQ(data.Dataset):
             motion_len = formatted_data['upper'].shape[0]
         else:
             motion_len = formatted_data['face'].shape[0]
+        collate_key = "vq_mixed"
+        if "face_p2" in formatted_data:
+            collate_key = "vq_face_pairs"
+        elif "face_p1" in formatted_data:
+            collate_key = "vq_face_single"
+        else:
+            has_upper = "upper" in formatted_data
+            has_lower = "lower" in formatted_data
+            has_hand = "hand" in formatted_data
+            has_face = "face" in formatted_data or "face_with_head" in formatted_data
+            if has_upper and not (has_lower or has_hand or has_face):
+                collate_key = "vq_upper"
+            elif has_lower and not (has_upper or has_hand or has_face):
+                collate_key = "vq_lower"
+            elif has_face and not (has_upper or has_lower or has_hand):
+                collate_key = "vq_face"
+            elif has_upper or has_lower or has_hand or has_face:
+                collate_key = "vq_mixed"
+            else:
+                collate_key = "vq_unknown"
+
         # Add additional information
         formatted_data.update({
             "id_name": formatted_data.get('id', ""),
@@ -2037,6 +2099,7 @@ class MixedDatasetVQ(data.Dataset):
             "split_name": "vq",
             "select_part": "compositional",
             "motion_len": motion_len,
+            "collate_key": collate_key,
             # "motion_len_1": motion_len_1,
             # "motion_len_2": motion_len_2,
         })

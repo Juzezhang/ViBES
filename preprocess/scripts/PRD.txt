@@ -1,0 +1,135 @@
+# 概述 (Overview)
+多模态对话智能体 (Multimodal Conversational Agent) 是一个结合语音、文本和面部动作的语言模型系统。该系统能够接收音频输入，处理成均匀的时间间隔分块，每个分块包含音频和面部表情令牌，并生成自然的对话响应。该系统主要基于 GLM-4-Voice 模型进行微调，旨在创建一个能够理解音频输入并生成相应音频和面部动作输出的对话智能体。
+
+# 核心功能 (Core Features)
+- **多模态输入处理**
+  - 处理音频和面部动作令牌作为输入
+  - 将输入按照固定时间间隔分块（每个块包含26个音频令牌和13个面部令牌）
+  - 音频采样率为12.5fps，面部采样率为6.25fps
+  
+- **基于GLM-4-Voice的微调模型**
+  - 利用预训练的GLM-4-Voice作为基础模型
+  - 在GLM-4-Voice基础上添加面部动作处理能力
+  - 保持原有的音频处理能力并进行增强
+  
+- **交互式对话生成**
+  - 生成连贯、自然的对话响应
+  - 输出包含音频和面部动作令牌
+  - 支持多轮对话交互
+
+# 用户体验 (User Experience)
+- **目标用户**
+  - 研究人员：需要具有面部表情能力的对话系统
+  - 开发者：构建多模态交互应用
+  - 教育工作者：需要更自然人机交互的教学环境
+  
+- **主要用户流程**
+  - 用户提供音频输入（可能包含面部表情数据）
+  - 系统处理输入并生成相应的多模态响应
+  - 用户可进行多轮对话交互
+
+# 技术架构 (Technical Architecture)
+- **System Components**
+  - Data Processing Pipeline: Handles the preprocessing of Candor dataset
+  - Model Architecture: GLM-4-Voice with additional face token processing
+  - Training Framework: Hugging Face Transformers-based training loop
+  - Inference System: Real-time processing of audio and generating responses
+  
+- **Data Models**
+  - Input Format: Interleaved format with audio and face tokens
+  - Training Data: JSONL files containing preprocessed conversations
+  - Token Structure: 13 face tokens followed by 26 audio tokens per chunk
+  
+- **Integration Points**
+  - HuggingFace Transformers library for model definition and training
+  - Custom tokenizer with extended vocabulary for face tokens
+  - Data loading through HuggingFace datasets
+  
+- **Infrastructure Requirements**
+  - GPU with sufficient VRAM for training (recommended 24GB+)
+  - Storage for preprocessed datasets
+  - Python environment with required dependencies
+
+# 开发路线图 (Development Roadmap)
+- **阶段一：基础架构开发**
+  - 从PyTorch Lightning迁移到Transformers Trainer
+  - 实现自定义数据加载器和数据整理器
+  - 设置适合GLM-4-Voice的训练参数
+  
+- **阶段二：模型增强与微调**
+  - 扩展tokenizer以包含面部令牌
+  - 针对Candor数据集进行模型微调
+  - 实现针对assistant部分的损失计算
+  
+- **阶段三：评估与优化**
+  - 开发评估指标以衡量模型性能
+  - 针对生成质量进行模型优化
+  - 解决过拟合或欠拟合问题
+  
+- **阶段四：推理系统开发**
+  - 实现高效的推理管道
+  - 开发用于测试的演示界面
+  - 优化实时性能
+
+# 逻辑依赖链 (Logical Dependency Chain)
+- **基础组件（优先级最高）**
+  - 数据处理管道（已完成）
+  - Transformers训练框架设置
+  - GLM-4-Voice模型初始化与配置
+  
+- **核心功能实现**
+  - 扩展tokenizer以包含面部令牌
+  - 自定义数据整理器实现
+  - 训练循环开发与调整
+  
+- **优化与评估**
+  - 训练超参数调整
+  - 模型评估与分析
+  - 性能优化
+
+# 风险与缓解措施 (Risks and Mitigations)
+- **技术挑战**
+  - 风险：GLM-4-Voice与面部令牌的兼容性问题
+    缓解：进行小规模测试以验证集成可行性
+  
+  - 风险：训练时间长且资源需求高
+    缓解：实现有效的调试模式，使用梯度累积策略，优化批处理大小
+  
+  - 风险：面部令牌与音频令牌的同步问题
+    缓解：确保数据预处理阶段的时间对齐
+  
+- **资源限制**
+  - 风险：GPU内存不足
+    缓解：实现梯度累积和混合精度训练
+  
+  - 风险：训练数据质量不一致
+    缓解：实现数据过滤和质量控制
+
+# 附录 (Appendix)
+- **关键技术规格**
+  - Model Base: GLM-4-Voice (Decoder-only Transformer)
+  - Token Configuration: 13 face tokens + 26 audio tokens per chunk
+  - Audio FPS: 12.5
+  - Face FPS: 6.25
+  - Training Scheme: Supervised fine-tuning with loss calculated only on assistant responses
+  
+- **训练配置参考**
+  ```yaml
+  # Training configuration excerpt
+  TRAIN:
+    PRECISION: bf16
+    BATCH_SIZE: 4
+    GRADIENT_ACCUMULATION_STEPS: 8
+    LEARNING_RATE: 1e-5
+    WEIGHT_DECAY: 0.01
+  ```
+  
+- **数据格式示例**
+  ```
+  <|system|>\nThe user will provide an audio conversation along with face motion data.
+  Do it step by step.First, think about the audio conversation and respond in a interleaved manner, with 13 face token followed by 26 audio tokens.
+
+  <|user|>\n<|audio_10815|><|audio_12173|><|face_10815|><|face_12173|>
+
+  <|assistant|>\n<|audio_10815|><|audio_12173|><|face_10815|><|face_12173|>
+  ``` 

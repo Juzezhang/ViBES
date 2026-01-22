@@ -1225,6 +1225,7 @@ class MixedDatasetVQArtalk(data.Dataset):
             "split_name": "vq",
             "motion_len_1": motion_len_1,
             "motion_len_2": motion_len_2,
+            "collate_key": "vq_face_pairs" if "face_p2" in formatted_data else "vq_face_single",
         })
         
         return formatted_data

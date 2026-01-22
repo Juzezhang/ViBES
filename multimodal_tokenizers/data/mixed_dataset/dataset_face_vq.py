@@ -1,4 +1,4 @@
-import random
+# import random
 import pickle
 import os
 import numpy as np
@@ -7,12 +7,12 @@ from torch.utils import data
 from os.path import join as pjoin
 import json
 import math
-import glob
+# import glob
 from tqdm import tqdm
-from .data_tools import (
-    JOINT_MASK_FACE,
-    BEAT_SMPLX_FACE,
-)
+# from .data_tools import (
+#     JOINT_MASK_FACE,
+#     BEAT_SMPLX_FACE,
+# )
 from multimodal_tokenizers.utils.rotation_conversions import axis_angle_to_6d, axis_angle_to_matrix, rotation_6d_to_axis_angle, axis_angle_to_6d_np
 import pandas as pd
 import codecs as cs
@@ -23,8 +23,7 @@ class FaceVQDataset(data.Dataset):
     Dataset for processing facial expression data for the VAE/VQ-VAE training stage.
     Follows the pattern of MixedDatasetVQ but focuses on facial expressions.
     """
-    
-    def __init__s(
+    def __init__(
         self,
         args,
         dataset_configs,
@@ -843,7 +842,9 @@ class FaceVQDataset(data.Dataset):
             "id_name": formatted_data.get('id', ""),
             "dataset_name": formatted_data.get('dataset_name', ""),
             "split_name": "vq",
+            "select_part": "face",
             "motion_len": motion_len,
+            "collate_key": "vq_face",
         })
         
         return formatted_data

@@ -86,9 +86,20 @@ https://github.com/user-attachments/assets/cd0191fa-394d-4476-aec7-c8aed7fe1690
 
 
 
-## Dataset Preprocessing
+## Dataset Preprocessing for tokenization
 
-To be updated
+Please refer to xxx
+
+
+## Tokenization Training
+
+python -m training.train_tokenizer --cfg configs/config_mixed_stage1_face.yaml --nodebug
+
+
+## Dataset Processing for SLB model training
+
+
+Please refer to xxx
 
 
 ## Acknowledgements

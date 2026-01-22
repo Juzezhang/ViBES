@@ -13,8 +13,8 @@ import pandas as pd
 import math
 import textgrid as tg
 from .utils.split_transcript import split_and_merge_sentences
-import librosa
-from numpy.lib import stride_tricks
+# import librosa
+# from numpy.lib import stride_tricks
 from pathlib import Path
 from multimodal_tokenizers.utils.token_utils import prepare_multimodal_tokens_for_lm, combine_audio_face_tokens
 

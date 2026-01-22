@@ -6,6 +6,7 @@ This script is borrowed from https://github.com/mkocabas/VIBE
 
 import os
 import math
+from pathlib import Path
 import trimesh
 
 import pyrender
@@ -16,7 +17,12 @@ from pyrender.constants import RenderFlags
 # os.environ['DISPLAY'] = ':0.0'
 # os.environ['PYOPENGL_PLATFORM'] = 'egl'
 # os.environ['PYOPENGL_PLATFORM'] = 'osmesa'
-SMPL_MODEL_DIR = "data/smpl_data/"
+model_files_env = os.environ.get("VIBES_MODEL_FILES_DIR")
+if model_files_env:
+    model_files_dir = Path(model_files_env)
+else:
+    model_files_dir = Path(__file__).resolve().parents[2] / "model_files"
+SMPL_MODEL_DIR = os.environ.get("VIBES_SMPL_MODEL_DIR", str(model_files_dir / "smpl_models"))
 
 
 def get_smpl_faces():

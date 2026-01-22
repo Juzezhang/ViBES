@@ -9,6 +9,7 @@ from .mixed_dataset import MixedDatasetVQ, MixedDatasetCB, MixedDatasetLLM, Mixe
 from .mixed_dataset import FaceVQDataset, UpperVQDataset, LowerVQDataset, GlobalVQDataset
 from .utils import conversation_collate, huggingface_dataset_collate
 from datasets import load_dataset
+from omegaconf import OmegaConf
 
 class MixedDataModule(BASEDataModule):
     def __init__(self, cfg, **kwargs):
@@ -19,18 +20,25 @@ class MixedDataModule(BASEDataModule):
         # Basic info of the dataset
         cfg.DATASET.JOINT_TYPE = 'smplx'
         self.njoints = 55
-        dataset_configs = cfg.DATASET.datasets
-        dataset_configs_test = cfg.DATASET.datasets_test
+        dataset_configs = self._apply_dataset_defaults(cfg.DATASET.datasets)
+        dataset_configs_test = self._apply_dataset_defaults(
+            OmegaConf.select(cfg, "DATASET.datasets_test")
+        )
+        if dataset_configs_test is None:
+            dataset_configs_test = dataset_configs
         # # Path to the dataset
         self.hparams.args = cfg.DATASET
         self.hparams.dataset_configs=dataset_configs
         self.hparams.dataset_configs_test=dataset_configs_test
         self.hparams.debug = cfg.DEBUG
         self.hparams.stage = cfg.TRAIN.STAGE
-        self.hparams.audio_down = cfg.model.params.lm.params.audio_down_sampling
+        audio_down = OmegaConf.select(cfg, "DATASET.audio_down")
+        if audio_down is None:
+            audio_down = 640
+        self.hparams.audio_down = audio_down
         # self.hparams.w_vectorizer = WordVectorizer(cfg.DATASET.WORD_VERTILIZER_PATH, "our_vab")
         self.hparams.motion_representation = cfg.DATASET.motion_representation
-        self.hparams.smpl_path = cfg.DATASET.SMPL_PATH
+        self.hparams.smpl_path = cfg.DATASET.SMPLX_MODEL_DIR
         self.hparams.njoints = 55
             
         # Select dataset class based on stage
@@ -119,6 +127,47 @@ class MixedDataModule(BASEDataModule):
 
         # # Get additional info of the dataset
         # self._sample_set = self.get_sample_set(overrides={"split": "test", "tiny": True})
+
+    def _apply_dataset_defaults(self, dataset_configs):
+        if dataset_configs is None:
+            return dataset_configs
+
+        global_defaults = {
+            "pose_length": OmegaConf.select(self.cfg, "DATASET.pose_length"),
+            "stride": OmegaConf.select(self.cfg, "DATASET.stride"),
+            "pose_fps": OmegaConf.select(self.cfg, "DATASET.pose_fps"),
+            "unit_length": OmegaConf.select(self.cfg, "DATASET.unit_length"),
+            "pre_frames": OmegaConf.select(self.cfg, "DATASET.pre_frames"),
+            "audio_fps": OmegaConf.select(self.cfg, "DATASET.audio_fps"),
+            "audio_down": OmegaConf.select(self.cfg, "DATASET.audio_down"),
+            "foot_contact_path": OmegaConf.select(self.cfg, "DATASET.foot_contact_path"),
+            "motion_unit": OmegaConf.select(self.cfg, "DATASET.motion_unit"),
+        }
+        dataset_override_keys = (
+            "training_speakers",
+            "testing_speakers",
+            "additional_data",
+            "pose_rep",
+            "pose_rep_mirror",
+            "pose_rep_face",
+            "foot_contact_path",
+            "motion_unit",
+            "code_path",
+            "code_path_audio",
+        )
+        for config in dataset_configs:
+            dataset_name = OmegaConf.select(config, "name")
+            for key, value in global_defaults.items():
+                if value is not None and OmegaConf.select(config, key) is None:
+                    config[key] = value
+            if dataset_name:
+                dataset_defaults = OmegaConf.select(self.cfg, f"DATASET.{dataset_name}")
+                if dataset_defaults is not None:
+                    for key in dataset_override_keys:
+                        value = OmegaConf.select(dataset_defaults, key)
+                        if value is not None and OmegaConf.select(config, key) is None:
+                            config[key] = value
+        return dataset_configs
 
 
     def feats2joints(self, features):

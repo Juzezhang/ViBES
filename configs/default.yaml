@@ -46,7 +46,6 @@ model:
   params:
     condition: 'text'
     task: 't2m'
-    lm: ${lm.default}
     motion_vae: ${vq.default}
 
     # Related parameters

@@ -1,4 +1,6 @@
 import numpy as np
+import os
+from pathlib import Path
 from conver_agent.utils.joints import mmm_joints, smplh2mmm_indexes
 
 # Map joints Name to SMPL joints idx
@@ -41,7 +43,18 @@ JOINT_MAP = {
     'OP Neck': 12,
 }
 
-bm_params = np.load('./model_files/smplx_models/smplx/SMPLX_NEUTRAL_2020.npz',allow_pickle=True)
+model_files_env = os.environ.get("VIBES_MODEL_FILES_DIR")
+if model_files_env:
+    MODEL_FILES_DIR = Path(model_files_env)
+else:
+    MODEL_FILES_DIR = Path(__file__).resolve().parents[4] / "model_files"
+SMPLX_MODEL_DIR = MODEL_FILES_DIR / "smplx_models"
+SMPL_MODEL_DIR = MODEL_FILES_DIR / "smpl_models"
+GMM_MODEL_DIR = SMPL_MODEL_DIR
+SMPL_MEAN_FILE = SMPL_MODEL_DIR / "neutral_smpl_mean_params.h5"
+Part_Seg_DIR = SMPL_MODEL_DIR / "smplx_parts_segm.pkl"
+
+bm_params = np.load(SMPLX_MODEL_DIR / "smplx" / "SMPLX_NEUTRAL_2020.npz", allow_pickle=True)
 JOINT_MAP_SMPLX2020 = bm_params['joint2num'].item()
 
 
@@ -116,8 +129,8 @@ MMM_JOINT_MAP = {
 # mmm_smpl_dix = smpl2mmm_indexes
 # mmm_smpl_dix = smplh2mmm_indexes
 # todo - configable
-SMPL_MODEL_DIR = "/simurgh/u/juze/code/conversational_agent/model_files/smpl_models/"
-GMM_MODEL_DIR = "/simurgh/u/juze/code/conversational_agent/model_files/smpl_models/"
-SMPL_MEAN_FILE = "/simurgh/u/juze/code/conversational_agent/model_files/smpl_models/neutral_smpl_mean_params.h5"
+SMPL_MODEL_DIR = str(SMPL_MODEL_DIR)
+GMM_MODEL_DIR = str(GMM_MODEL_DIR)
+SMPL_MEAN_FILE = str(SMPL_MEAN_FILE)
 # for collsion
-Part_Seg_DIR = "/simurgh/u/juze/code/conversational_agent/model_files/smpl_models/smplx_parts_segm.pkl"
+Part_Seg_DIR = str(Part_Seg_DIR)

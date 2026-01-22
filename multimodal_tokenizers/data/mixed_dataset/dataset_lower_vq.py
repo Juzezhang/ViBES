@@ -1084,6 +1084,7 @@ class LowerVQDataset(data.Dataset):
             "split_name": "vq",
             "select_part": "lower",
             "motion_len": motion_len,
+            "collate_key": "vq_lower",
         })
         
         return formatted_data

@@ -1,0 +1,244 @@
+#!/usr/bin/env python3
+
+import torch
+from smplx import FLAME
+import numpy as np
+import trimesh
+import torch
+from os.path import join, exists
+import os
+import argparse
+from conver_agent.utils.renderer_utils import RenderMesh
+import matplotlib
+import matplotlib.pyplot as plt
+from conver_agent.utils.utils_videos import write_video
+import cv2
+matplotlib.use('Agg')
+from tqdm import tqdm
+from conver_agent.utils.rotation_conversions import rotation_6d_to_axis_angle, axis_angle_to_6d, axis_angle_to_6d_np
+from transformers import AutoTokenizer, WhisperFeatureExtractor, AutoModel
+from conver_agent.archs.lom_vq import VQVAEConvZeroDSUS_PaperVersion, VQVAEConvZeroDSUS1_PaperVersion
+import uuid
+from transformers.generation.streamers import BaseStreamer
+import sys
+sys.path.insert(0, "./cosyvoice")
+sys.path.insert(0, "./third_party/Matcha-TTS")
+from audio_process import AudioStreamProcessor
+from flow_inference import AudioDecoder
+import logging
+import re
+
+def save_obj(verts, faces, path):
+    """Save mesh vertices and faces to an OBJ file."""
+    mesh = trimesh.Trimesh(vertices=verts[0].numpy(), faces=faces)
+    mesh.export(path)
+
+import soundfile as sf
+
+
+
+# ---------------------- Configurable Dataset and Model Paths ----------------------
+FLAME_COEFFS_DIR = "/simurgh/group/juze/datasets/YouTube_Talking_Synthetic/FLAME_coeffs_25"
+FACE_CODE_DIR = "/simurgh/group/juze/datasets/YouTube_Talking_Synthetic/TOKENS_512_512_DS1_wo_meshloss_synthetic"
+TRANSCRIPT_DIR = "/simurgh/group/juze/datasets/YouTube_Talking_Synthetic/transcript"
+# AUDIO_CODE_DIR = "/simurgh/group/juze/datasets/YouTube_Talking_Synthetic/audios"
+AUDIO_CODE_DIR = "/simurgh/group/juze/datasets/YouTube_Talking_Synthetic/audios_token_glm"
+MODEL_DIR = "./model_files/FLAME2020/"
+OUTPUT_DIR = "./output_videos"
+
+# ---------------------- Argument Parsing ----------------------
+parser = argparse.ArgumentParser(description='Process facial meshes for visualization')
+parser.add_argument('--audio_name', type=str, default="202008647_0002.wav", 
+                    help='Audio name within the sequence')
+parser.add_argument('--start_time', type=int, default=0, 
+                    help='Starting time index')
+parser.add_argument('--end_time', type=int, default=60, 
+                    help='Ending time index')
+parser.add_argument('--batch_size', type=int, default=100, 
+                    help='Batch size for processing')
+parser.add_argument('--no_cuda', action='store_true',
+                    help='Disable CUDA even if available')
+parser.add_argument('--gpu_id', type=int, default=0,
+                    help='GPU ID to use if CUDA is available (default: 0)')
+parser.add_argument('--show_speaker', default=True,
+                    help='Show speaker in the video')
+args = parser.parse_args()
+
+# ---------------------- Device Setup ----------------------
+use_cuda = torch.cuda.is_available() and not args.no_cuda
+if use_cuda:
+    torch.cuda.set_device(args.gpu_id)
+    print(f"Using GPU {args.gpu_id}: {torch.cuda.get_device_name(args.gpu_id)}")
+    device = torch.device(f"cuda:{args.gpu_id}")
+else:
+    device = torch.device("cpu")
+    print("Using CPU")
+
+# ---------------------- Path and Variable Setup ----------------------
+audio_name = args.audio_name
+start_time = args.start_time
+end_time = args.end_time
+batch_size = args.batch_size
+show_speaker = args.show_speaker
+
+
+# ---------------------- Load Audio Tokens ----------------------
+
+
+# Load FLAME coefficients (expression, shape, pose) for the video
+audio_code_path = join(AUDIO_CODE_DIR, audio_name.replace(".wav", ".npy"))
+audio_tokens = np.load(audio_code_path)
+audio_end_time_max = audio_tokens.shape[0] / 12.5
+end_time = min(end_time, audio_end_time_max)
+audio_start_frame = int(start_time * 12.5)
+audio_end_frame = int(end_time * 12.5)
+audio_tokens = audio_tokens[audio_start_frame:audio_end_frame]
+
+this_uuid = str(uuid.uuid4())
+audio_processor = AudioStreamProcessor()
+# Initialize variables before processing files
+prompt_speech_feat = torch.zeros(1, 0, 80).to(device)
+flow_prompt_speech_token = torch.zeros(1, 0, dtype=torch.int64).to(device)
+# Flow & Hift
+flow_config = os.path.join("./glm-4-voice-decoder", "config.yaml")
+flow_checkpoint = os.path.join("./glm-4-voice-decoder", 'flow.pt')
+hift_checkpoint = os.path.join("./glm-4-voice-decoder", 'hift.pt')
+audio_decoder = AudioDecoder(config_path=flow_config, flow_ckpt_path=flow_checkpoint,
+                                hift_ckpt_path=hift_checkpoint,
+                                device=device)
+
+tts_token = torch.tensor(audio_tokens, device=device).unsqueeze(0)
+tts_speech, tts_mel = audio_decoder.token2wav(tts_token, uuid=this_uuid,
+                                            prompt_token=flow_prompt_speech_token.to(device),
+                                            prompt_feat=prompt_speech_feat.to(device),
+                                            finalize=True)
+final_speech = tts_speech[0].cpu()
+
+# ---------------------- Load Face Tokens ----------------------
+face_token_start_frame = int(start_time * 25)
+face_token_end_frame = int(end_time * 25)
+
+# Load FLAME coefficients (expression, shape, pose) for the video
+face_code_path = join(FACE_CODE_DIR, audio_name.replace(".wav", ".npy"))
+face_tokens = np.load(face_code_path)[:, face_token_start_frame:face_token_end_frame]
+
+checkpoint = torch.load('/simurgh/u/juze/code/conversational_agent/experiments/conversational_agent/VQVAE_Mixed_Face_Only_512_DS1_Dim_512_wo_meshloss/checkpoints/epoch=79.ckpt', map_location="cpu", weights_only=False)
+state_dict = checkpoint['state_dict']  # Get only the state_dict
+# Create new state dict with modified keys
+state_dict_face = {}
+for key, value in state_dict.items():
+    if 'vae_face' in key:
+        new_key = key.replace('vae_face.', '')
+        state_dict_face[new_key] = value
+
+vae_face = VQVAEConvZeroDSUS1_PaperVersion(
+    vae_layer=3,
+    code_num=512,
+    codebook_size=512,
+    vae_quantizer_lambda=1,
+    vae_test_dim=112
+)
+
+# Save only the modified state_dict
+vae_face.load_state_dict(state_dict_face, strict=True)
+vae_face.eval()
+vae_face.to(device)
+face_tokens = torch.tensor(face_tokens, device=device)
+rec_face = vae_face.decode(face_tokens.int())
+rec_head_pose = 0 * rotation_6d_to_axis_angle(rec_face[0, :, :6])
+rec_jaw_pose = rotation_6d_to_axis_angle(rec_face[0, :, 6:12])
+rec_exp = rec_face[0, :, 12:]
+n = rec_head_pose.shape[0]
+model_path = "./model_files/FLAME2020/"
+batch_size_visualize = 100
+# Initialize FLAME model with the adjusted batch size and move to GPU
+flame_model = FLAME(model_path, num_expression_coeffs=100, ext='pkl', batch_size=batch_size_visualize).to(device)
+faces = torch.tensor(flame_model.faces.astype(np.int32), dtype=torch.int64)
+mesh_renderer = RenderMesh(image_size=256, faces=faces, scale=1.0)
+
+pred_images = []
+for i in range(0, n, batch_size_visualize):
+    if batch_size_visualize > n - i:
+        batch_size_visualize = n - i
+        flame_model = FLAME(model_path, num_expression_coeffs=100, ext='pkl', batch_size=batch_size_visualize).to(device)
+    actual_visualize_batch_size = batch_size_visualize
+    # Run FLAME model for both reconstructed and ground truth
+    with torch.no_grad():
+        flame_out = flame_model(
+            global_orient=rec_head_pose[i:i+actual_visualize_batch_size, :],
+            expression=rec_exp[i:i+actual_visualize_batch_size, :],
+            jaw_pose=rec_jaw_pose[i:i+actual_visualize_batch_size, :],
+            shape=torch.zeros(actual_visualize_batch_size, 100).to(device),
+        )
+    verts = flame_out['vertices'].detach()
+    for v in tqdm(verts):
+        rgb = mesh_renderer(v[None])[0]
+        pred_images.append(rgb.cpu()[0] / 255.0)
+pred_images_tensor = torch.stack(pred_images)
+
+
+# ---------------------- Load FLAME Coefficients (Ground Truth) ----------------------
+face_coeff_start_frame = int(start_time * 25)
+face_coeff_end_frame = int(end_time * 25)
+# Load FLAME coefficients (expression, shape, pose) for the video
+coeffs_path = join(FLAME_COEFFS_DIR, audio_name.replace(".wav", ".npz"))
+data = np.load(coeffs_path)
+exp = data['exp'][face_coeff_start_frame:face_coeff_end_frame]
+shape = data['shape'][face_coeff_start_frame:face_coeff_end_frame]
+pose = data['pose'][face_coeff_start_frame:face_coeff_end_frame]
+# Convert numpy arrays to torch tensors and move to device
+exp = torch.FloatTensor(exp).to(device)
+shape = torch.FloatTensor(shape).to(device)
+pose = torch.FloatTensor(pose).to(device)
+head_pose = 0 * pose[:, :3]
+jaw_pose = pose[:, 3:]
+n = exp.shape[0]
+batch_size_visualize = 100
+
+flame_model_gt = FLAME(model_path, num_expression_coeffs=100, ext='pkl', batch_size=batch_size_visualize).to(device)
+pred_images_gt = []
+for i in range(0, n, batch_size_visualize):
+    if batch_size_visualize > n - i:
+        batch_size_visualize = n - i
+        flame_model_gt = FLAME(model_path, num_expression_coeffs=100, ext='pkl', batch_size=batch_size_visualize).to(device)
+    actual_visualize_batch_size = batch_size_visualize
+    # Run FLAME model for both reconstructed and ground truth
+    with torch.no_grad():
+        flame_out = flame_model_gt(
+            global_orient=head_pose[i:i+actual_visualize_batch_size, :],
+            expression=exp[i:i+actual_visualize_batch_size, :],
+            jaw_pose=jaw_pose[i:i+actual_visualize_batch_size, :],
+            shape=torch.zeros(actual_visualize_batch_size, 100).to(device),
+        )
+    verts = flame_out['vertices'].detach()
+    for v in tqdm(verts):
+        rgb = mesh_renderer(v[None])[0]
+        pred_images_gt.append(rgb.cpu()[0] / 255.0)
+pred_images_tensor_gt = torch.stack(pred_images_gt)
+
+frame_num_gt, _,  gt_height, gt_width = pred_images_tensor_gt.shape
+frame_num, _,  height, width = pred_images_tensor.shape
+
+assert frame_num_gt == frame_num
+combined_width = gt_width + width
+# Concatenate previously generated images horizontally
+combined_image = np.zeros((frame_num_gt, 3, gt_height, combined_width))
+combined_image[:, :, :, :gt_width] = pred_images_tensor_gt
+combined_image[:, :, :, gt_width:] = pred_images_tensor
+
+# Convert to float tensor and append to results
+combined_image = np.asarray(combined_image).astype(np.float32)
+combined_image = torch.FloatTensor(combined_image)
+
+# Use sequence and video name in the output filename
+# Prepare output directory and file path
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+dump_path = join(OUTPUT_DIR, f"{audio_name.split('/')[0]}_{start_time}_{end_time}_fromcode.mp4")
+
+print(f"Saving video to: {dump_path}")
+audio_clip = final_speech
+audio_clip = audio_clip[:int(combined_image.shape[0]/25.0*22050)]
+write_video(combined_image*255.0, dump_path, 25, audio_clip, 22050, "aac")
+print("Video saved successfully!")
+
+

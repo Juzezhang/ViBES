@@ -1044,6 +1044,7 @@ class UpperVQDataset(data.Dataset):
             "split_name": "vq",
             "select_part": "upper",
             "motion_len": motion_len,
+            "collate_key": "vq_upper",
         })
         
         return formatted_data

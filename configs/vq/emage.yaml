@@ -11,6 +11,5 @@ params:
   variational: False
   vae_quantizer_lambda: 1.0
   e_name: VAESKConv
-  data_path_1: ./models/
-
+  data_path_1: ${DATASET.MODEL_FILES_DIR}/
 

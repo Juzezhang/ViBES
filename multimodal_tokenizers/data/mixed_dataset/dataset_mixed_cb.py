@@ -997,4 +997,5 @@ class MixedDatasetCB(data.Dataset):
             "a_tokens_len": a_tokens_len,
             "text": text,
             "split_name": 'train',
+            "collate_key": "lm_tokens",
         }

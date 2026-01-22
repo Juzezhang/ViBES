@@ -29,10 +29,13 @@ def get_smplx_model(model_type='smplx', model_path=None, cfg=None, device='cuda'
     if model_key not in _SMPLX_MODELS:
         # Determine the model path from various sources (prioritize config)
         if model_path is None:
-            if cfg is not None and hasattr(cfg, 'DATASET') and hasattr(cfg.DATASET, 'SMPL_MODEL_DIR'):
-                model_path = cfg.DATASET.SMPL_MODEL_DIR
+            if cfg is not None and hasattr(cfg, 'DATASET') and hasattr(cfg.DATASET, 'SMPLX_MODEL_DIR'):
+                model_path = cfg.DATASET.SMPLX_MODEL_DIR
             else:
-                model_path = os.environ.get('SMPLX_MODEL_DIR', './models/smpl_models/smplx')
+                model_path = os.environ.get(
+                    'VIBES_SMPLX_MODEL_DIR',
+                    os.environ.get('SMPLX_MODEL_DIR', './model_files/smplx_models'),
+                )
         
         logging.info(f"Initializing {model_type} model from {model_path}")
         

@@ -4,6 +4,26 @@ from omegaconf.listconfig import ListConfig
 from omegaconf.base import ContainerMetadata
 from typing import Any
 
+
+def _is_state_dict(maybe_state_dict):
+    if not isinstance(maybe_state_dict, dict):
+        return False
+    for value in maybe_state_dict.values():
+        if isinstance(value, torch.Tensor):
+            return True
+    return False
+
+
+def _extract_state_dict(checkpoint, checkpoint_path=""):
+    if isinstance(checkpoint, dict):
+        if "state_dict" in checkpoint:
+            return checkpoint["state_dict"]
+        if "model_state" in checkpoint:
+            return checkpoint["model_state"]
+        if _is_state_dict(checkpoint):
+            return checkpoint
+    raise KeyError(f"Missing state_dict in checkpoint: {checkpoint_path}")
+
 def load_pretrained(cfg, model, logger=None, phase="train"):
     if logger is not None:
         logger.info(f"Loading pretrain model from {cfg.TRAIN.PRETRAINED}")
@@ -15,7 +35,8 @@ def load_pretrained(cfg, model, logger=None, phase="train"):
         
     # Add OmegaConf classes to safe globals before loading
     add_safe_globals([ListConfig, ContainerMetadata])
-    state_dict = torch.load(ckpt_path, map_location="cpu", weights_only=True)["state_dict"]
+    checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+    state_dict = _extract_state_dict(checkpoint, ckpt_path)
 
     model.load_state_dict(state_dict, strict=False)
     return model
@@ -31,10 +52,13 @@ def load_pretrained_debug(cfg, model, logger=None, phase="train"):
     # Add OmegaConf classes to safe globals before loading
     # add_safe_globals([ListConfig, ContainerMetadata])
     states = torch.load(ckpt_path, weights_only=True, map_location=torch.device('cpu'))
+    model_state = states.get('model_state')
+    if model_state is None:
+        model_state = _extract_state_dict(states, ckpt_path)
 
     new_weights = OrderedDict()
     flag=False
-    for k, v in states['model_state'].items():
+    for k, v in model_state.items():
         #print(k)
         if "module" not in k:
             break
@@ -46,9 +70,9 @@ def load_pretrained_debug(cfg, model, logger=None, phase="train"):
             model.load_state_dict(new_weights, strict=False)
         except:
             #print(states['model_state'])
-            model.load_state_dict(states['model_state'])
+            model.load_state_dict(model_state)
     else:
-        model.load_state_dict(states['model_state'])
+        model.load_state_dict(model_state)
 
     return model
 
@@ -68,7 +92,8 @@ def load_pretrained_without_vqvae(cfg, model, logger=None, phase="train"):
     #    logger.info(f"Checkpoint keys: {list(model.keys())}")
     #else:
     #    print(f"Checkpoint keys: {list(model.keys())}")
-    state_dict = torch.load(ckpt_path, map_location="cpu", weights_only=False)["state_dict"]
+    checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    state_dict = _extract_state_dict(checkpoint, ckpt_path)
     model.load_state_dict(state_dict, strict=False)
     return model
 
@@ -83,7 +108,8 @@ def load_pretrained_without_vae(cfg, model, logger=None, phase="train"):
 
     # Add OmegaConf classes to safe globals before loading
     add_safe_globals([ListConfig, ContainerMetadata])
-    state_dict = torch.load(ckpt_path, map_location="cpu", weights_only=True)["state_dict"]
+    checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+    state_dict = _extract_state_dict(checkpoint, ckpt_path)
     model.load_state_dict(state_dict, strict=False)
 
     return model
@@ -99,7 +125,7 @@ def load_pretrained_vae_face(cfg, model, logger, phase="train"):
     
     # Load full checkpoint and extract only the state_dict
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    state_dict = checkpoint['state_dict']  # Get only the state_dict
+    state_dict = _extract_state_dict(checkpoint, checkpoint_path)
     
     # Create new state dict with modified keys
     state_dict_face = {}
@@ -127,7 +153,7 @@ def load_pretrained_vae_upper(cfg, model, logger, phase="train"):
 
     # Load full checkpoint and extract only the state_dict
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    state_dict = checkpoint['state_dict']  # Get only the state_dict
+    state_dict = _extract_state_dict(checkpoint, checkpoint_path)
     
     # Create new state dict with modified keys
     state_dict_upper = {}
@@ -152,7 +178,7 @@ def load_pretrained_vae_lower(cfg, model, logger, phase="train"):
     
     # Load full checkpoint and extract only the state_dict
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    state_dict = checkpoint['state_dict']  # Get only the state_dict
+    state_dict = _extract_state_dict(checkpoint, checkpoint_path)
     
     # Create new state dict with modified keys
     state_dict_lower = {}
@@ -177,7 +203,7 @@ def load_pretrained_vae_hand(cfg, model, logger, phase="train"):
     
     # Load full checkpoint and extract only the state_dict
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    state_dict = checkpoint['state_dict']  # Get only the state_dict
+    state_dict = _extract_state_dict(checkpoint, checkpoint_path)
     
     # Create new state dict with modified keys
     state_dict_hand = {}
@@ -199,7 +225,7 @@ def load_pretrained_vae_compositional(cfg, model, logger, phase="train"):
     if cfg.TEST.CHECKPOINTS_FACE != '':   
         checkpoint_path_face = cfg.TEST.CHECKPOINTS_FACE
         checkpoint_face = torch.load(checkpoint_path_face, map_location="cpu", weights_only=False)
-        state_dict_face = checkpoint_face['state_dict']
+        state_dict_face = _extract_state_dict(checkpoint_face, checkpoint_path_face)
         # Create new state dict with modified keys
         state_dict_face_new = {}
         for key, value in state_dict_face.items():
@@ -212,7 +238,7 @@ def load_pretrained_vae_compositional(cfg, model, logger, phase="train"):
     if cfg.TEST.CHECKPOINTS_UPPER != '':   
         checkpoint_path_upper = cfg.TEST.CHECKPOINTS_UPPER
         checkpoint_upper = torch.load(checkpoint_path_upper, map_location="cpu", weights_only=False)
-        state_dict_upper = checkpoint_upper['state_dict']
+        state_dict_upper = _extract_state_dict(checkpoint_upper, checkpoint_path_upper)
         # Create new state dict with modified keys
         state_dict_upper_new = {}
         for key, value in state_dict_upper.items():
@@ -224,7 +250,7 @@ def load_pretrained_vae_compositional(cfg, model, logger, phase="train"):
     if cfg.TEST.CHECKPOINTS_LOWER != '':   
         checkpoint_path_lower = cfg.TEST.CHECKPOINTS_LOWER
         checkpoint_lower = torch.load(checkpoint_path_lower, map_location="cpu", weights_only=False)
-        state_dict_lower = checkpoint_lower['state_dict']
+        state_dict_lower = _extract_state_dict(checkpoint_lower, checkpoint_path_lower)
         # Create new state dict with modified keys
         state_dict_lower_new = {}
         for key, value in state_dict_lower.items():
@@ -236,7 +262,7 @@ def load_pretrained_vae_compositional(cfg, model, logger, phase="train"):
     if cfg.TEST.CHECKPOINTS_HAND != '':   
         checkpoint_path_hand = cfg.TEST.CHECKPOINTS_HAND
         checkpoint_hand = torch.load(checkpoint_path_hand, map_location="cpu", weights_only=False)
-        state_dict_hand = checkpoint_hand['state_dict']
+        state_dict_hand = _extract_state_dict(checkpoint_hand, checkpoint_path_hand)
         # Create new state dict with modified keys
         state_dict_hand_new = {}
         for key, value in state_dict_hand.items():
@@ -251,7 +277,7 @@ def load_pretrained_vae_compositional(cfg, model, logger, phase="train"):
     if cfg.TEST.CHECKPOINTS_GLOBAL != '':   
         checkpoint_path_global = cfg.TEST.CHECKPOINTS_GLOBAL
         checkpoint_global = torch.load(checkpoint_path_global, map_location="cpu", weights_only=False)
-        state_dict_global = checkpoint_global['state_dict']
+        state_dict_global = _extract_state_dict(checkpoint_global, checkpoint_path_global)
         # Create new state dict with modified keys
         state_dict_global_new = {}
         for key, value in state_dict_global.items():
@@ -273,7 +299,7 @@ def load_pretrained_vae(cfg, model, logger, phase="train"):
     
     # Load full checkpoint and extract only the state_dict
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    state_dict = checkpoint['state_dict']  # Get only the state_dict
+    state_dict = _extract_state_dict(checkpoint, checkpoint_path)
     
     # Create new state dict with modified keys
     state_dict_face = {}
@@ -335,8 +361,8 @@ def load_pretrained_vae(cfg, model, logger, phase="train"):
 def load_pretrained_tokenizer(model, save_path):
     # Add OmegaConf classes to safe globals before loading
     add_safe_globals([ListConfig, ContainerMetadata])
-    state_dict = torch.load(save_path,
-                            map_location="cpu", weights_only=True)['state_dict']
+    checkpoint = torch.load(save_path, map_location="cpu", weights_only=True)
+    state_dict = _extract_state_dict(checkpoint, save_path)
 
     # Extract encoder/decoder
     from collections import OrderedDict

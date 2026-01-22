@@ -5,11 +5,11 @@ import torch.nn as nn
 from torchmetrics import Metric
 from torchmetrics.functional import pairwise_euclidean_distance
 from .utils import *
-from conver_agent.config import instantiate_from_config
-from conver_agent.archs.motion_representation import VAESKConv
-from conver_agent.utils import metric
-from conver_agent.optimizers.loss_factory import get_loss_func
-from conver_agent.metrics import data_tools
+from multimodal_tokenizers.config import instantiate_from_config
+from multimodal_tokenizers.archs.motion_representation import VAESKConv
+from multimodal_tokenizers.utils import metric
+from multimodal_tokenizers.optimizers.loss_factory import get_loss_func
+from multimodal_tokenizers.metrics import data_tools
 import torch.nn.functional as F
 from os.path import join as pjoin
 

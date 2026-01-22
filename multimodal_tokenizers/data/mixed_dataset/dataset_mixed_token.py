@@ -1157,7 +1157,16 @@ class MixedDatasetToken(data.Dataset):
         in_facial = torch.from_numpy(in_facial.copy()).reshape((in_facial.shape[0], -1)).float()
 
         # return {"pose":tar_pose, "facial":in_facial, "beta": in_shape, "trans":trans}
-        return {"pose":tar_pose, "beta": in_shape, "trans":trans, "facial":in_facial, "seq_name":file_name, "split_name": 'token', "dataset_name":dataset_name}
+        return {
+            "pose": tar_pose,
+            "beta": in_shape,
+            "trans": trans,
+            "facial": in_facial,
+            "seq_name": file_name,
+            "split_name": "token",
+            "dataset_name": dataset_name,
+            "collate_key": "token",
+        }
 
 
 
