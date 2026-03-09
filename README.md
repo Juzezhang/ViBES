@@ -18,9 +18,9 @@ ViBES is a speech-language-behavior (SLB) model with a mixture-of-modality-exper
 - [x] Initial code release
 - [x] Inference code for conversational behavior of facial expressions
 - [] Inference code for conversational behavior of body (Note: we use motion representation from previous methods, but experiments show global translation is unstable, so we decided to use the representation from GENMO. We will release the body part when ready.)
-- [] Training code for face expert
+- [x] Training code for face expert
 - [] Training code for body expert
-- [] Dataset release (facial part)
+- [x] Dataset release (facial part)
 - [] Dataset release (body part)
 - [] Dataset preprocessing
 
