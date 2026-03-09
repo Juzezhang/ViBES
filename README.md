@@ -262,10 +262,10 @@ We thank the following projects for sharing their great work.
 If you find our work useful in your research, please consider citing:
 ```bibtex
 @inproceedings{
-      zhang2025vibes,
+      zhang2026vibes,
         title={ViBES: A Conversational Agent with Behaviorally-Intelligent 3D Virtual Body},
       author={Juze Zhang and Changan Chen and Xin Chen and Heng Yu and Tiange Xiang and Ali Sartaz Khan and Shrinidhi Kowshika Lakshmikanth and Ehsan Adeli},
-      booktitle={arXiv},
-      year={2025},
+      booktitle={CVPR},
+      year={2026},
 }
 ```
