@@ -1,5 +1,5 @@
 import torch
-# from torch.serialization import add_safe_globals
+from torch.serialization import add_safe_globals
 from omegaconf.listconfig import ListConfig
 from omegaconf.base import ContainerMetadata
 from typing import Any
@@ -219,73 +219,122 @@ def load_pretrained_vae_hand(cfg, model, logger, phase="train"):
     return model
 
 
+def load_pretrained_vae_body(cfg, model, logger, phase="train"):
+    # Load pretrained VAE body model
+    if phase == "train":
+        checkpoint_path = cfg.TRAIN.PRETRAINED_VQ
+    elif phase == "token":
+        checkpoint_path = cfg.TEST.CHECKPOINTS_BODY
+    elif phase == "test":
+        checkpoint_path = cfg.TEST.CHECKPOINTS
+    else:
+        raise ValueError(f"Unknown phase: {phase}. Expected 'train', 'token', or 'test'.")
+
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    state_dict = _extract_state_dict(checkpoint, checkpoint_path)
+
+    state_dict_body = {}
+    for key, value in state_dict.items():
+        if 'vae_body' in key:
+            new_key = key.replace('vae_body.', '')
+            state_dict_body[new_key] = value
+
+    model.vae_body.load_state_dict(state_dict_body, strict=True)
+    if logger:
+        logger.info(f"Loaded body VAE from {checkpoint_path}")
+    return model
+
+
 def load_pretrained_vae_compositional(cfg, model, logger, phase="train"):
     # Load pretrained VAE model
     # checkpoint_path= cfg.TRAIN.PRETRAINED_VQ
-    if cfg.TEST.CHECKPOINTS_FACE != '':   
+    def _log(msg):
+        if logger is not None:
+            logger.info(msg)
+        else:
+            print(msg)
+
+    def _load_part(state_dict, prefix, module, name, strict=True):
+        # Prefer prefix-based extraction
+        part_state = {
+            k.replace(f"{prefix}.", ""): v
+            for k, v in state_dict.items()
+            if k.startswith(f"{prefix}.")
+        }
+        use_strict = strict
+        if not part_state:
+            # Fallback: direct key match against module state_dict
+            model_keys = set(module.state_dict().keys())
+            direct_state = {k: v for k, v in state_dict.items() if k in model_keys}
+            if direct_state:
+                part_state = direct_state
+                use_strict = False
+            else:
+                _log(f"Skipping {name} VAE load: no matching keys found in checkpoint.")
+                return
+        incompatible = module.load_state_dict(part_state, strict=use_strict)
+        if hasattr(incompatible, "missing_keys") and (incompatible.missing_keys or incompatible.unexpected_keys):
+            _log(
+                f"{name} VAE load: missing={len(incompatible.missing_keys)} "
+                f"unexpected={len(incompatible.unexpected_keys)} (strict={use_strict})"
+            )
+    loaded_upper_lower = False
+    checkpoint_path_upper_lower = cfg.TEST.get("CHECKPOINTS_UPPER_LOWER", "")
+    if checkpoint_path_upper_lower:
+        checkpoint_upper_lower = torch.load(checkpoint_path_upper_lower, map_location="cpu", weights_only=False)
+        state_dict_upper_lower = _extract_state_dict(checkpoint_upper_lower, checkpoint_path_upper_lower)
+        if hasattr(model, "vae_upper"):
+            _load_part(state_dict_upper_lower, "vae_upper", model.vae_upper, "upper")
+        if hasattr(model, "vae_lower"):
+            _load_part(state_dict_upper_lower, "vae_lower", model.vae_lower, "lower")
+        loaded_upper_lower = True
+        _log(f"Loaded upper+lower VAE from {checkpoint_path_upper_lower}")
+
+    if cfg.TEST.CHECKPOINTS_FACE != '' and hasattr(model, "vae_face"):   
         checkpoint_path_face = cfg.TEST.CHECKPOINTS_FACE
         checkpoint_face = torch.load(checkpoint_path_face, map_location="cpu", weights_only=False)
         state_dict_face = _extract_state_dict(checkpoint_face, checkpoint_path_face)
-        # Create new state dict with modified keys
-        state_dict_face_new = {}
-        for key, value in state_dict_face.items():
-            if 'vae_face' in key:
-                new_key = key.replace('vae_face.', '')
-                state_dict_face_new[new_key] = value
-        model.vae_face.load_state_dict(state_dict_face_new, strict=True)
-        logger.info(f"Loaded face VAE from {checkpoint_path_face}")
+        _load_part(state_dict_face, "vae_face", model.vae_face, "face")
+        _log(f"Loaded face VAE from {checkpoint_path_face}")
 
-    if cfg.TEST.CHECKPOINTS_UPPER != '':   
+    if cfg.TEST.CHECKPOINTS_UPPER != '' and not loaded_upper_lower and hasattr(model, "vae_upper"):   
         checkpoint_path_upper = cfg.TEST.CHECKPOINTS_UPPER
         checkpoint_upper = torch.load(checkpoint_path_upper, map_location="cpu", weights_only=False)
         state_dict_upper = _extract_state_dict(checkpoint_upper, checkpoint_path_upper)
-        # Create new state dict with modified keys
-        state_dict_upper_new = {}
-        for key, value in state_dict_upper.items():
-            if 'vae_upper' in key:
-                new_key = key.replace('vae_upper.', '')
-                state_dict_upper_new[new_key] = value
-        model.vae_upper.load_state_dict(state_dict_upper_new, strict=True)
-        logger.info(f"Loaded upper body vqvae from {checkpoint_path_upper}")
-    if cfg.TEST.CHECKPOINTS_LOWER != '':   
+        _load_part(state_dict_upper, "vae_upper", model.vae_upper, "upper")
+        _log(f"Loaded upper body vqvae from {checkpoint_path_upper}")
+    if cfg.TEST.CHECKPOINTS_LOWER != '' and not loaded_upper_lower and hasattr(model, "vae_lower"):   
         checkpoint_path_lower = cfg.TEST.CHECKPOINTS_LOWER
         checkpoint_lower = torch.load(checkpoint_path_lower, map_location="cpu", weights_only=False)
         state_dict_lower = _extract_state_dict(checkpoint_lower, checkpoint_path_lower)
-        # Create new state dict with modified keys
-        state_dict_lower_new = {}
-        for key, value in state_dict_lower.items():
-            if 'vae_lower' in key:
-                new_key = key.replace('vae_lower.', '')
-                state_dict_lower_new[new_key] = value
-        model.vae_lower.load_state_dict(state_dict_lower_new, strict=True)
-        logger.info(f"Loaded lower body vqvae from {checkpoint_path_lower}")
-    if cfg.TEST.CHECKPOINTS_HAND != '':   
+        _load_part(state_dict_lower, "vae_lower", model.vae_lower, "lower")
+        _log(f"Loaded lower body vqvae from {checkpoint_path_lower}")
+    if cfg.TEST.CHECKPOINTS_HAND != '' and hasattr(model, "vae_hand"):   
         checkpoint_path_hand = cfg.TEST.CHECKPOINTS_HAND
         checkpoint_hand = torch.load(checkpoint_path_hand, map_location="cpu", weights_only=False)
         state_dict_hand = _extract_state_dict(checkpoint_hand, checkpoint_path_hand)
-        # Create new state dict with modified keys
-        state_dict_hand_new = {}
-        for key, value in state_dict_hand.items():
-            if 'vae_hands' in key:
-                new_key = key.replace('vae_hands.', '')
-                state_dict_hand_new[new_key] = value
-            elif 'vae_hand' in key:
-                new_key = key.replace('vae_hand.', '')
-                state_dict_hand_new[new_key] = value
-        model.vae_hand.load_state_dict(state_dict_hand_new, strict=True)
-        logger.info(f"Loaded hand vqvae from {checkpoint_path_hand}")
-    if cfg.TEST.CHECKPOINTS_GLOBAL != '':   
+        # Support both vae_hands and vae_hand prefixes
+        part_state = {
+            k.replace("vae_hands.", "").replace("vae_hand.", ""): v
+            for k, v in state_dict_hand.items()
+            if k.startswith("vae_hands.") or k.startswith("vae_hand.")
+        }
+        if part_state:
+            incompatible = model.vae_hand.load_state_dict(part_state, strict=True)
+            if hasattr(incompatible, "missing_keys") and (incompatible.missing_keys or incompatible.unexpected_keys):
+                _log(
+                    f"hand VAE load: missing={len(incompatible.missing_keys)} "
+                    f"unexpected={len(incompatible.unexpected_keys)}"
+                )
+        else:
+            _load_part(state_dict_hand, "vae_hand", model.vae_hand, "hand", strict=False)
+        _log(f"Loaded hand vqvae from {checkpoint_path_hand}")
+    if cfg.TEST.CHECKPOINTS_GLOBAL != '' and hasattr(model, "vae_global"):
         checkpoint_path_global = cfg.TEST.CHECKPOINTS_GLOBAL
         checkpoint_global = torch.load(checkpoint_path_global, map_location="cpu", weights_only=False)
         state_dict_global = _extract_state_dict(checkpoint_global, checkpoint_path_global)
-        # Create new state dict with modified keys
-        state_dict_global_new = {}
-        for key, value in state_dict_global.items():
-            if 'vae_global' in key:
-                new_key = key.replace('vae_global.', '')
-                state_dict_global_new[new_key] = value
-        model.vae_global.load_state_dict(state_dict_global_new, strict=True)
-        logger.info(f"Loaded global vqvae from {checkpoint_path_global}")
+        _load_part(state_dict_global, "vae_global", model.vae_global, "global")
+        _log(f"Loaded global vqvae from {checkpoint_path_global}")
 
     return model
 

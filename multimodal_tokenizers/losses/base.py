@@ -70,7 +70,10 @@ class BaseLosses(nn.Module):
         '''Convert the loss name to a log name.'''
         if loss == "total":
             log_name = f"{loss}/{split}"
+        elif "_" not in loss:
+            # Single-word metrics like "perplexity"
+            log_name = f"{loss}/{split}"
         else:
-            loss_type, name = loss.split("_")
+            loss_type, name = loss.split("_", 1)
             log_name = f"{loss_type}/{name}/{split}"
         return log_name

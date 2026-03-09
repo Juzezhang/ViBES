@@ -146,7 +146,8 @@ def synthesize_intermediate_frames_FILM(frame1, frame2, t, name, save_path):
     import os
     cv2.imwrite(save_path[:-9]+name+"_frame1.png", frame1)
     cv2.imwrite(save_path[:-9]+name+"_frame2.png", frame2)
-    os.environ["REPLICATE_API_TOKEN"] = "r8_He1rkPk9GAxNQ3LpOohK8sYw1SUfMYV3Fxk9b"
+    if "REPLICATE_API_TOKEN" not in os.environ:
+        raise EnvironmentError("REPLICATE_API_TOKEN environment variable is not set. Please set it before calling this function.")
     output = replicate.run(
         "google-research/frame-interpolation:4f88a16a13673a8b589c18866e540556170a5bcb2ccdc12de556e800e9456d3d",
         input={
@@ -444,14 +445,11 @@ def estimate_linear_velocity(data_seq, dt):
     return vel_seq
 
 def velocity2position(data_seq, dt, init_pos):
-    res_trans = []
-    for i in range(data_seq.shape[1]):
-        if i == 0:
-            res_trans.append(init_pos.unsqueeze(1))
-        else:
-            res = data_seq[:, i-1:i] * dt + res_trans[-1]
-            res_trans.append(res)
-    return torch.cat(res_trans, dim=1)
+    # Vectorized integration: p_t = p_0 + sum_{k=0}^{t-1} v_k * dt
+    init = init_pos.unsqueeze(1)
+    zeros = torch.zeros_like(data_seq[:, :1])
+    vel = torch.cat([zeros, data_seq[:, :-1]], dim=1) * dt
+    return init + torch.cumsum(vel, dim=1)
 
 def estimate_angular_velocity(rot_seq, dt):
     '''

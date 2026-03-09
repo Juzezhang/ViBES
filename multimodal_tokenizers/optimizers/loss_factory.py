@@ -87,9 +87,9 @@ class KLDLoss(nn.Module):
     def __init__(self, beta=0.1):
         super(KLDLoss, self).__init__()
         self.beta = beta
-    
+
     def forward(self, outputs, targets):
-        final_loss = F.smooth_l1_loss((outputs / self.beta, targets / self.beta) * self.beta)
+        final_loss = F.smooth_l1_loss(outputs / self.beta, targets / self.beta) * self.beta
         return final_loss
 
 
@@ -97,10 +97,10 @@ class REGLoss(nn.Module):
     def __init__(self, beta=0.1):
         super(REGLoss, self).__init__()
         self.beta = beta
-    
+
     def forward(self, outputs, targets):
-        final_loss = F.smooth_l1_loss((outputs / self.beta, targets / self.beta) * self.beta)
-        return final_loss    
+        final_loss = F.smooth_l1_loss(outputs / self.beta, targets / self.beta) * self.beta
+        return final_loss
 
 
 class L2Loss(nn.Module):
@@ -108,8 +108,8 @@ class L2Loss(nn.Module):
         super(L2Loss, self).__init__()
     
     def forward(self, outputs, targets):
-        final_loss = F.l2_loss(outputs, targets)
-        return final_loss    
+        final_loss = F.mse_loss(outputs, targets)
+        return final_loss
 
 
 
@@ -183,13 +183,14 @@ class UpperLoss(nn.Module):
 
 
 class LowerLoss(nn.Module):
-    def __init__(self, Is_VQVAE=True):
+    def __init__(self, Is_VQVAE=True, root_weight=1.0):
         super(LowerLoss, self).__init__()
 
         self.rec_loss = GeodesicLoss()
         self.vel_loss = torch.nn.L1Loss(reduction='mean')
         self.vectices_loss = torch.nn.MSELoss(reduction='mean')
         self.Is_VQVAE = Is_VQVAE
+        self.root_weight = root_weight
 
     def inverse_selection_tensor(self, filtered_t, selection_array, n):
     # Create a zero array with shape n*165
@@ -211,7 +212,7 @@ class LowerLoss(nn.Module):
         bs, n = tar_lower.shape[0], min(tar_lower.shape[1], rec_lower.shape[1])
         j = 9
 
-        if rec_lower.shape[2] == 61:
+        if rec_lower.shape[2] >= 61:
             foot_flag = True
             tar_contact = tar_lower[:, :n, j*6+3:j*6+7]
             rec_contact = rec_lower[:, :n, j*6+3:j*6+7]
@@ -223,8 +224,15 @@ class LowerLoss(nn.Module):
         if Loss_6D == False:
             rec_lower = rotation_6d_to_matrix(rec_lower[..., :54].reshape(bs, n, 9, 6))
             tar_lower = rotation_6d_to_matrix(tar_lower[..., :54].reshape(bs, n, 9, 6))
-        
-        loss_rec_lower = self.rec_loss(rec_lower, tar_lower)
+            geo = self.rec_loss.compute_geodesic_distance(rec_lower, tar_lower).view(bs, n, j)
+            if self.root_weight != 1.0:
+                weights = torch.ones((j,), device=geo.device, dtype=geo.dtype)
+                weights[0] = self.root_weight
+                loss_rec_lower = (geo * weights).mean()
+            else:
+                loss_rec_lower = geo.mean()
+        else:
+            loss_rec_lower = self.rec_loss(rec_lower, tar_lower)
 
         
         velocity_loss = self.vel_loss(rec_lower[:, 1:] - rec_lower[:, :-1],
@@ -274,48 +282,75 @@ class LowerLoss(nn.Module):
 
 
 class GlobalLoss(nn.Module):
-    def __init__(self, Is_VQVAE=False, pose_fps=30):
+    def __init__(self, Is_VQVAE=False, pose_fps=30, vel_weight=1.0, pos_weight=1.0):
         super(GlobalLoss, self).__init__()
         self.rec_loss = GeodesicLoss()
         self.vel_loss = torch.nn.L1Loss(reduction='mean')
         self.vectices_loss = torch.nn.MSELoss(reduction='mean')
         self.Is_VQVAE = Is_VQVAE
         self.pose_fps = pose_fps
+        # Scales translation-velocity supervision (local/world velocity + smoothness)
+        self.vel_weight = vel_weight
+        # Scales reconstructed root position supervision
+        self.pos_weight = pos_weight
 
     def inverse_selection_tensor(self, filtered_t, selection_array, n):
         # Create a zero array with shape n*165
         selection_array = torch.from_numpy(selection_array).to(filtered_t.device)
         original_shape_t = torch.zeros((n, 165)).to(filtered_t.device)
-        
+
         # Find indices where selection array is 1
         selected_indices = torch.where(selection_array == 1)[0]
-        
+
         # Fill the filtered_t values into original_shape_t at corresponding positions
         for i in range(n):
             original_shape_t[i, selected_indices] = filtered_t[i]
-            
-        return original_shape_t
-    
-    def forward(self, rec_xyz_trans, rec_trans, tar_trans, tar_trans_vel_x, tar_trans_vel_z, rec_contact, tar_contact):
 
+        return original_shape_t
+
+    def forward(self, rec_xyz_trans, rec_local_vel, tar_trans, tar_local_vel):
+        """
+        Compute global translation loss with GENMO-style local velocity representation.
+
+        Args:
+            rec_xyz_trans: Reconstructed world position (bs, n, 3)
+            rec_local_vel: Reconstructed local velocity (bs, n, 3)
+            tar_trans: Target world position (bs, n, 3)
+            tar_local_vel: Target local velocity (bs, n, 3)
+        """
         g_loss_final = 0
-        loss_contact = self.vectices_loss(rec_contact, tar_contact)
-        g_loss_final += loss_contact 
-        
-        loss_trans_vel = self.vel_loss(rec_trans[:, :, 0:1], tar_trans_vel_x)  + self.vel_loss(rec_trans[:, :, 2:3], tar_trans_vel_z) 
-        v3 =  self.vel_loss(rec_trans[:, :, 0:1][:, 1:] - rec_trans[:, :, 0:1][:, :-1], tar_trans_vel_x[:, 1:] - tar_trans_vel_x[:, :-1]) \
-        + self.vel_loss(rec_trans[:, :, 2:3][:, 1:] - rec_trans[:, :, 2:3][:, :-1], tar_trans_vel_z[:, 1:] - tar_trans_vel_z[:, :-1]) 
-        a3 = self.vel_loss(rec_trans[:, :, 0:1][:, 2:] + rec_trans[:, :, 0:1][:, :-2] - 2 * rec_trans[:, :, 0:1][:, 1:-1], tar_trans_vel_x[:, 2:] + tar_trans_vel_x[:, :-2] - 2 * tar_trans_vel_x[:, 1:-1]) \
-        + self.vel_loss(rec_trans[:, :, 2:3][:, 2:] + rec_trans[:, :, 2:3][:, :-2] - 2 * rec_trans[:, :, 2:3][:, 1:-1], tar_trans_vel_z[:, 2:] + tar_trans_vel_z[:, :-2] - 2 * tar_trans_vel_z[:, 1:-1]) 
-        g_loss_final += 5*v3 
-        g_loss_final += 5*a3
-        v2 = self.vel_loss(rec_xyz_trans[:, 1:] - rec_xyz_trans[:, :-1], tar_trans[:, 1:] - tar_trans[:, :-1]) 
-        a2 = self.vel_loss(rec_xyz_trans[:, 2:] + rec_xyz_trans[:, :-2] - 2 * rec_xyz_trans[:, 1:-1], tar_trans[:, 2:] + tar_trans[:, :-2] - 2 * tar_trans[:, 1:-1]) 
-        g_loss_final += 5*v2 
-        g_loss_final += 5*a2 
-        g_loss_final += loss_trans_vel
-        loss_trans = self.vel_loss(rec_xyz_trans, tar_trans) 
-        g_loss_final += loss_trans
+
+        # Local velocity loss (direct supervision on local velocity)
+        loss_local_vel = self.vel_loss(rec_local_vel, tar_local_vel)
+        g_loss_final += self.vel_weight * loss_local_vel
+
+        # Local velocity smoothness (velocity of velocity, and acceleration)
+        local_vel_v = self.vel_loss(
+            rec_local_vel[:, 1:] - rec_local_vel[:, :-1],
+            tar_local_vel[:, 1:] - tar_local_vel[:, :-1]
+        )
+        local_vel_a = self.vel_loss(
+            rec_local_vel[:, 2:] + rec_local_vel[:, :-2] - 2 * rec_local_vel[:, 1:-1],
+            tar_local_vel[:, 2:] + tar_local_vel[:, :-2] - 2 * tar_local_vel[:, 1:-1]
+        )
+        g_loss_final += self.vel_weight * 5 * local_vel_v
+        g_loss_final += self.vel_weight * 5 * local_vel_a
+
+        # World position velocity and acceleration consistency
+        v2 = self.vel_loss(
+            rec_xyz_trans[:, 1:] - rec_xyz_trans[:, :-1],
+            tar_trans[:, 1:] - tar_trans[:, :-1]
+        )
+        a2 = self.vel_loss(
+            rec_xyz_trans[:, 2:] + rec_xyz_trans[:, :-2] - 2 * rec_xyz_trans[:, 1:-1],
+            tar_trans[:, 2:] + tar_trans[:, :-2] - 2 * tar_trans[:, 1:-1]
+        )
+        g_loss_final += self.vel_weight * 5 * v2
+        g_loss_final += self.vel_weight * 5 * a2
+
+        # World position loss
+        loss_trans = self.vel_loss(rec_xyz_trans, tar_trans)
+        g_loss_final += self.pos_weight * loss_trans
 
         return g_loss_final
 
@@ -363,8 +398,8 @@ class FaceLoss(nn.Module):
             # vertices loss
 
         if Loss_6D == True:
-            tar_pose = rotation_6d_to_axis_angle(tar_pose).reshape(bs*n, j*6)
-            rec_pose = rotation_6d_to_axis_angle(rec_pose).reshape(bs*n, j*6)
+            tar_pose = rotation_6d_to_axis_angle(tar_pose).reshape(bs*n, j*3)
+            rec_pose = rotation_6d_to_axis_angle(rec_pose).reshape(bs*n, j*3)
         else:
             tar_pose = matrix_to_axis_angle(tar_pose).reshape(bs*n, j*3)
             rec_pose = matrix_to_axis_angle(rec_pose).reshape(bs*n, j*3)
@@ -508,5 +543,3 @@ def get_loss_func(loss_name, **kwargs):
     loss_func_class = LOSS_FUNC_LUT.get(loss_name)   
     loss_func = loss_func_class(**kwargs)   
     return loss_func
-
-

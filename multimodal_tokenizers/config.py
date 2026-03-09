@@ -171,11 +171,21 @@ def parse_args(phase="train"):
     OmegaConf.register_new_resolver("eval", eval)
     # OmegaConf.register_resolver("eval", eval)
     cfg_assets = OmegaConf.load(params.cfg_assets)
+    if OmegaConf.select(cfg_assets, "CONFIG_FOLDER") is None:
+        cfg_assets.CONFIG_FOLDER = "./configs"
     cfg_base = OmegaConf.load(pjoin(cfg_assets.CONFIG_FOLDER, 'default.yaml'))
     cfg_exp = OmegaConf.merge(cfg_base, OmegaConf.load(params.cfg))
     if not cfg_exp.FULL_CONFIG:
         cfg_exp = get_module_config(cfg_exp, cfg_assets.CONFIG_FOLDER)
     cfg = OmegaConf.merge(cfg_exp, cfg_assets)
+
+    # Ensure required top-level defaults exist
+    if OmegaConf.select(cfg, "DEVICE") is None:
+        cfg.DEVICE = [0]
+    if OmegaConf.select(cfg, "NUM_NODES") is None:
+        cfg.NUM_NODES = 1
+    if OmegaConf.select(cfg, "ACCELERATOR") is None:
+        cfg.ACCELERATOR = "gpu"
 
     # Update config with arguments
     if phase in ["train", "test"]:

@@ -1,5 +1,5 @@
 import pytorch_lightning as pl
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 
 class BASEDataModule(pl.LightningDataModule):
@@ -50,7 +50,7 @@ class BASEDataModule(pl.LightningDataModule):
             params = self.hparams.copy()
             params['code_path'] = None
             params['split'] = self.cfg.TEST.SPLIT
-            self._test_dataset = self.DatasetEval( **params)
+            self._test_dataset = self.DatasetEval(**params)
         return self._test_dataset
 
     def setup(self, stage=None):
@@ -65,9 +65,22 @@ class BASEDataModule(pl.LightningDataModule):
         dataloader_options = self.dataloader_options.copy()
         dataloader_options["batch_size"] = self.cfg.TRAIN.BATCH_SIZE
         dataloader_options["num_workers"] = self.cfg.TRAIN.NUM_WORKERS
+        sampling_ratio = getattr(self.cfg.DATASET, "SAMPLING_RATIO", None)
+        sampler = None
+        shuffle = True
+        if sampling_ratio and hasattr(self.train_dataset, "get_sampling_weights"):
+            weights = self.train_dataset.get_sampling_weights(sampling_ratio)
+            if weights is not None:
+                sampler = WeightedRandomSampler(
+                    weights,
+                    num_samples=len(weights),
+                    replacement=True,
+                )
+                shuffle = False
         return DataLoader(
             self.train_dataset,
-            shuffle=False,
+            shuffle=shuffle,
+            sampler=sampler,
             persistent_workers=True,
             **dataloader_options,
         )

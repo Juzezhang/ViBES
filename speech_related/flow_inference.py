@@ -1,3 +1,5 @@
+import os
+import sys
 import torch
 import torchaudio
 import numpy as np
@@ -5,6 +7,11 @@ import re
 from hyperpyyaml import load_hyperpyyaml
 import uuid
 from collections import defaultdict
+
+# Ensure cosyvoice package is importable for hyperpyyaml class resolution.
+_speech_related_dir = os.path.dirname(os.path.abspath(__file__))
+if _speech_related_dir not in sys.path:
+    sys.path.insert(0, _speech_related_dir)
 
 
 def fade_in_out(fade_in_mel, fade_out_mel, window):
@@ -153,4 +160,3 @@ class AudioDecoder:
         tts_speech = torch.cat(tts_speechs, dim=-1).cpu()
 
         return tts_speech.cpu()
-

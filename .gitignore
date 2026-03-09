@@ -2,6 +2,7 @@
 configs
 configs/lm
 configs/mics
+docs
 experiments
 evaluation
 inference/mics
@@ -28,6 +29,15 @@ training
 ViBES-Face
 
 datasets/
+
+# Large files / output directories
+results/
+user_study/
+
+# Claude Code / dev notes
+.claude/
+CLAUDE.md
+bugs.md
 
 # Python cache files
 __pycache__/

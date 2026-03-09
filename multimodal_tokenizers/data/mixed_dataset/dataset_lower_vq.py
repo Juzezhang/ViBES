@@ -19,6 +19,31 @@ import pandas as pd
 import codecs as cs
 import smplx
 
+
+def get_local_transl_vel(transl, global_orient):
+    """
+    Compute local translation velocity in root-relative coordinates.
+    Args:
+        transl: (L, 3) world translation (numpy array)
+        global_orient: (L, 3) axis-angle global orientation (numpy array)
+    Returns:
+        (L, 3) local translation velocity (numpy array)
+    """
+    transl = torch.as_tensor(transl, dtype=torch.float32)
+    global_orient = torch.as_tensor(global_orient, dtype=torch.float32)
+
+    # Frame-to-frame velocity in world coordinates
+    velocity = torch.zeros_like(transl)
+    velocity[1:] = transl[1:] - transl[:-1]
+    # velocity[0] stays zero — no previous frame to compute velocity from
+
+    # Transform to local coordinates (root-relative)
+    R = axis_angle_to_matrix(global_orient)  # (L, 3, 3)
+    R_inv = R.transpose(-1, -2)
+    local_vel = torch.einsum('lij,lj->li', R_inv, velocity)
+    return local_vel.numpy()
+
+
 class LowerVQDataset(data.Dataset):
     """
     Dataset for processing facial expression data for the VAE/VQ-VAE training stage.
@@ -85,6 +110,8 @@ class LowerVQDataset(data.Dataset):
         self.cache_format = cache_format
         self.smpl_path = smpl_path  # Store the path for later use if needed
         self.motion_representation = motion_representation
+        self.lower_with_betas = bool(getattr(args, "LOWER_WITH_BETAS", False))
+        self.lower_beta_dim = int(getattr(args, "LOWER_BETA_DIM", 0))
 
         # Store kwargs for SMPLX initialization if needed
         if motion_representation == "rotation":
@@ -115,6 +142,10 @@ class LowerVQDataset(data.Dataset):
                 self._load_amass(config)
                 self.data_dict.update(self.data_dict_amass)
                 self.metadata.extend(self.metadata_amass)
+            elif dataset_name == "AMASS_talking":
+                self._load_amass_talking(config)
+                self.data_dict.update(self.data_dict_amass_talking)
+                self.metadata.extend(self.metadata_amass_talking)
             elif dataset_name == "CANDOR":
                 self._load_candor(config)
                 self.data_dict.update(self.data_dict_candor)
@@ -310,9 +341,23 @@ class LowerVQDataset(data.Dataset):
         self.data_dict_beat2 = {}
         self.metadata_beat2 = []
 
+        selected_count = len(self.selected_file)
+        print(
+            f"BEAT2 selected {selected_count} files for split={self.split} "
+            f"(additional_data={bool(additional_data)})"
+        )
+        if selected_count == 0:
+            print(
+                "No BEAT2 files matched. Check DATASET.BEAT2.ROOT, train_test_split.csv, "
+                f"and training_speakers={training_speakers}."
+            )
+            return
+
         # Process each file in the selected files
-        for index, file_name in tqdm(self.selected_file.iterrows()):
-            f_name = file_name["id"]
+        for idx, file_row in enumerate(
+            tqdm(self.selected_file.itertuples(index=False), total=selected_count)
+        ):
+            f_name = file_row.id
             pose_file = pjoin(self.data_root_beat2, pose_rep, f_name + ".npz")
             
             # try:
@@ -331,12 +376,13 @@ class LowerVQDataset(data.Dataset):
 
             
             # Calculate foot contacts using existing function or load from cache
-            foot_contacts_path = pjoin(self.data_root_beat2, 'foot_contacts_25', f_name + '.npy')
+            foot_contacts_root = getattr(config, "foot_contact_path", "foot_contacts_25")
+            foot_contacts_path = pjoin(self.data_root_beat2, foot_contacts_root, f_name + '.npy')
             if os.path.exists(foot_contacts_path):
                 contacts = np.load(foot_contacts_path)
             else:
                 contacts = self.comput_foot_contacts(pose_data)
-                os.makedirs(pjoin(self.data_root_beat2, 'foot_contacts_25'), exist_ok=True)
+                os.makedirs(pjoin(self.data_root_beat2, foot_contacts_root), exist_ok=True)
                 np.save(foot_contacts_path, contacts)
             # Concatenate foot contacts to pose data
             pose_processed = np.concatenate([pose_processed, contacts], axis=1)
@@ -350,10 +396,17 @@ class LowerVQDataset(data.Dataset):
             # Extract and convert lower body pose data
             tar_pose_leg = tar_pose[:, self.joint_mask_lower.astype(bool)].reshape(n, 9, 3)  # 9 lower body joints
             tar_pose_leg_6d = axis_angle_to_6d_np(tar_pose_leg).reshape(n, 9 * 6)
-            
-            # Combine lower body pose with translation and contacts
-            tar_pose_lower = np.concatenate([tar_pose_leg_6d, tar_trans, tar_contact], axis=1)
-            
+
+            # Extract global_orient for local velocity computation (pelvis = joint 0)
+            tar_global_orient = tar_pose[:, :3]
+            # Compute local translation velocity (GENMO-style representation)
+            tar_local_transl_vel = get_local_transl_vel(tar_trans, tar_global_orient)
+
+            # Combine lower body pose with local velocity and contacts
+            tar_pose_lower = np.concatenate([tar_pose_leg_6d, tar_local_transl_vel, tar_contact], axis=1)
+            if self.lower_with_betas:
+                beta_slice = betas[:, :self.lower_beta_dim]
+                tar_pose_lower = np.concatenate([tar_pose_lower, beta_slice], axis=1)
 
             # Calculate time segments
             round_seconds_skeleton = tar_pose_lower.shape[0] // pose_fps_beat2
@@ -399,7 +452,7 @@ class LowerVQDataset(data.Dataset):
                 self.metadata_beat2.append(new_name)
                 
             # Break early for debugging if max data reached
-            if index >= self.maxdata:
+            if idx >= self.maxdata:
                 break
         
         # Save processed data to cache
@@ -491,12 +544,13 @@ class LowerVQDataset(data.Dataset):
                 pose_processed = poses * JOINT_MASK_FULL
                 pose_processed = pose_processed[:, JOINT_MASK_FULL.astype(bool)]
                 
-                foot_contacts_path = pjoin(self.data_root_amass, 'foot_contacts_25', file_name + '.npy')
+                foot_contacts_root = getattr(config, "foot_contact_path", "foot_contacts_25")
+                foot_contacts_path = pjoin(self.data_root_amass, foot_contacts_root, file_name + '.npy')
                 if os.path.exists(foot_contacts_path):
                     contacts = np.load(foot_contacts_path)
                 else:
                     contacts = self.comput_foot_contacts(pose_data)
-                    os.makedirs(pjoin(self.data_root_amass, 'foot_contacts_25'), exist_ok=True)
+                    os.makedirs(pjoin(self.data_root_amass, foot_contacts_root), exist_ok=True)
                     np.save(foot_contacts_path, contacts)
                 # Concatenate foot contacts to pose data
                 pose_processed = np.concatenate([pose_processed, contacts], axis=1)
@@ -511,10 +565,18 @@ class LowerVQDataset(data.Dataset):
                 # Extract and convert lower body pose data
                 tar_pose_leg = tar_pose[:, self.joint_mask_lower.astype(bool)].reshape(n, 9, 3)
                 tar_pose_leg_6d = axis_angle_to_6d_np(tar_pose_leg).reshape(n, 9 * 6)
-                
-                # Combine lower body pose with translation and contacts
-                tar_pose_lower = np.concatenate([tar_pose_leg_6d, tar_trans, tar_contact], axis=1)
-                
+
+                # Extract global_orient for local velocity computation (pelvis = joint 0)
+                tar_global_orient = tar_pose[:, :3]
+                # Compute local translation velocity (GENMO-style representation)
+                tar_local_transl_vel = get_local_transl_vel(tar_trans, tar_global_orient)
+
+                # Combine lower body pose with local velocity and contacts
+                tar_pose_lower = np.concatenate([tar_pose_leg_6d, tar_local_transl_vel, tar_contact], axis=1)
+                if self.lower_with_betas:
+                    beta_slice = betas[:, :self.lower_beta_dim]
+                    tar_pose_lower = np.concatenate([tar_pose_lower, beta_slice], axis=1)
+
                 # Calculate time segments
                 round_seconds_skeleton = tar_pose_lower.shape[0] // pose_fps_amass
                 if round_seconds_skeleton == 0:
@@ -572,6 +634,136 @@ class LowerVQDataset(data.Dataset):
         
         # Save processed data to cache
         self._save_to_cache(cache_path, self.data_dict_amass, self.metadata_amass, "AMASS")
+
+    def _load_amass_talking(self, config):
+        """
+        Load the AMASS_talking dataset for lower-body training.
+
+        Parameters:
+        - config: Configuration dictionary for AMASS_talking.
+        """
+        data_root = self.args["AMASS_talking"].ROOT
+        cache_path = self._get_cache_path(data_root, "AMASS_talking")
+        pose_rep = config.pose_rep
+        foot_contact_root = getattr(config, "foot_contact_path", "foot_contacts_25")
+
+        data_dict, metadata = self._load_from_cache(cache_path, "AMASS_talking")
+        if data_dict is not None:
+            self.data_dict_amass_talking = data_dict
+            self.metadata_amass_talking = metadata
+            return
+
+        self._initialize_smplx_if_needed()
+
+        print("Processing AMASS_talking dataset...")
+        self.data_root_amass = data_root
+        pose_fps_amass = config.pose_fps
+
+        split_file_train = pjoin(self.data_root_amass, 'train.txt')
+        id_list_train = []
+        with cs.open(split_file_train, "r") as f:
+            for line in f.readlines():
+                id_list_train.append(line.strip())
+
+        split_file_test = pjoin(self.data_root_amass, 'test.txt')
+        id_list_test = []
+        with cs.open(split_file_test, "r") as f:
+            for line in f.readlines():
+                id_list_test.append(line.strip())
+
+        if self.split == 'train':
+            id_list_amass = id_list_train
+        elif self.split == 'test':
+            id_list_amass = id_list_test
+        else:
+            id_list_amass = id_list_train + id_list_test
+
+        self.ori_length = config.pose_length
+        self.metadata_amass_talking = []
+        self.data_dict_amass_talking = {}
+
+        for index, file_name in tqdm(enumerate(id_list_amass)):
+            try:
+                pose_file = pjoin(self.data_root_amass, pose_rep, file_name + '.npz')
+                pose_data = np.load(pose_file, allow_pickle=True)
+
+                poses = pose_data["poses"]
+                n, _ = poses.shape
+                tar_trans = pose_data["trans"]
+
+                padded_betas = np.zeros(300)
+                padded_betas[:16] = pose_data["betas"]
+                betas = np.repeat(padded_betas.reshape(1, 300), n, axis=0)
+
+                pose_processed = poses * JOINT_MASK_FULL
+                pose_processed = pose_processed[:, JOINT_MASK_FULL.astype(bool)]
+
+                foot_contacts_path = pjoin(self.data_root_amass, foot_contact_root, file_name + '.npy')
+                if os.path.exists(foot_contacts_path):
+                    contacts = np.load(foot_contacts_path)
+                else:
+                    contacts = self.comput_foot_contacts(pose_data)
+                    os.makedirs(pjoin(self.data_root_amass, foot_contact_root), exist_ok=True)
+                    np.save(foot_contacts_path, contacts)
+
+                pose_processed = np.concatenate([pose_processed, contacts], axis=1)
+                tar_pose = pose_processed[:, :165]
+                tar_contact = contacts
+
+                tar_pose_leg = tar_pose[:, self.joint_mask_lower.astype(bool)].reshape(n, 9, 3)
+                tar_pose_leg_6d = axis_angle_to_6d_np(tar_pose_leg).reshape(n, 9 * 6)
+
+                # Extract global_orient for local velocity computation (pelvis = joint 0)
+                tar_global_orient = tar_pose[:, :3]
+                # Compute local translation velocity (GENMO-style representation)
+                tar_local_transl_vel = get_local_transl_vel(tar_trans, tar_global_orient)
+
+                tar_pose_lower = np.concatenate([tar_pose_leg_6d, tar_local_transl_vel, tar_contact], axis=1)
+                if self.lower_with_betas:
+                    beta_slice = betas[:, :self.lower_beta_dim]
+                    tar_pose_lower = np.concatenate([tar_pose_lower, beta_slice], axis=1)
+
+                round_seconds_skeleton = tar_pose_lower.shape[0] // pose_fps_amass
+                if round_seconds_skeleton == 0:
+                    round_seconds_skeleton = 1
+                clip_s_t, clip_e_t = 0, round_seconds_skeleton - 0
+                clip_s_f_pose, clip_e_f_pose = clip_s_t * pose_fps_amass, clip_e_t * pose_fps_amass
+
+                if self.split == 'test' or self.split == 'token':
+                    cut_length = clip_e_f_pose - clip_s_f_pose
+                    stride = cut_length
+                else:
+                    stride = int(config.stride)
+                    cut_length = int(self.ori_length)
+
+                num_subdivision = math.floor((clip_e_f_pose - clip_s_f_pose - cut_length) / stride) + 1
+
+                for i in range(num_subdivision):
+                    start_idx = clip_s_f_pose + i * stride
+                    fin_idx = start_idx + cut_length
+                    if fin_idx > tar_pose_lower.shape[0]:
+                        continue
+
+                    sample_lower = tar_pose_lower[start_idx:fin_idx]
+                    sample_shape = betas[start_idx:fin_idx]
+                    sample_trans = tar_trans[start_idx:fin_idx]
+
+                    new_name = 'amass_talking_' + '%s_%d' % (file_name, i)
+                    self.data_dict_amass_talking[new_name] = {
+                        'lower': sample_lower,
+                        'shape': sample_shape,
+                        'trans': sample_trans,
+                        'id': file_name,
+                        'dataset_name': 'amass_talking',
+                    }
+                    self.metadata_amass_talking.append(new_name)
+            except Exception:
+                continue
+
+            if index >= self.maxdata:
+                break
+
+        self._save_to_cache(cache_path, self.data_dict_amass_talking, self.metadata_amass_talking, "AMASS_talking")
 
 
     def _load_candor(self, config):

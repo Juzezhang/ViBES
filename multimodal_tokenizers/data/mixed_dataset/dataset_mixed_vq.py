@@ -6,6 +6,7 @@ import codecs as cs
 import torch
 from torch.utils import data
 from os.path import join as pjoin
+from pathlib import Path
 from rich.progress import track
 import json
 import spacy
@@ -34,6 +35,31 @@ from multimodal_tokenizers.data.mixed_dataset.data_tools import (
 )
 from multimodal_tokenizers.utils.rotation_conversions import axis_angle_to_6d, axis_angle_to_matrix, rotation_6d_to_axis_angle, axis_angle_to_6d_np
 
+
+def get_local_transl_vel(transl, global_orient):
+    """
+    Compute local translation velocity in root-relative coordinates.
+    Args:
+        transl: (L, 3) world translation (numpy array)
+        global_orient: (L, 3) axis-angle global orientation (numpy array)
+    Returns:
+        (L, 3) local translation velocity (numpy array)
+    """
+    transl = torch.as_tensor(transl, dtype=torch.float32)
+    global_orient = torch.as_tensor(global_orient, dtype=torch.float32)
+
+    # Frame-to-frame velocity in world coordinates
+    velocity = torch.zeros_like(transl)
+    velocity[1:] = transl[1:] - transl[:-1]
+    # velocity[0] stays zero — no previous frame to compute velocity from
+
+    # Transform to local coordinates (root-relative)
+    R = axis_angle_to_matrix(global_orient)  # (L, 3, 3)
+    R_inv = R.transpose(-1, -2)
+    local_vel = torch.einsum('lij,lj->li', R_inv, velocity)
+    return local_vel.numpy()
+
+
 class MixedDatasetVQ(data.Dataset):
     def __init__(
         self,
@@ -54,6 +80,8 @@ class MixedDatasetVQ(data.Dataset):
         use_cache=False,  # Whether to load data from cache when available
         save_cache=False,  # Whether to save processed data to cache
         cache_format="pkl", # Format to use for caching: "h5", "npz", or "pkl"
+        normalization_dir=None,  # Directory containing Mean.npy and Std.npy for preprocessed data
+        normalize=True,  # Whether to apply normalization to preprocessed data
         **kwargs,
     ):
         """
@@ -73,17 +101,17 @@ class MixedDatasetVQ(data.Dataset):
         - use_cache: Whether to load data from cache when available.
         - save_cache: Whether to save processed data to cache.
         - cache_format: Format to use for caching ("h5", "npz", or "pkl").
+        - normalization_dir: Directory containing Mean.npy and Std.npy for preprocessed data.
+        - normalize: Whether to apply normalization to preprocessed data.
         """
         # Store debug flag for cache path generation
         self.debug = debug
         
         # Set max data size depending on debug mode
         if tiny or debug:
-            # self.maxdata = 10
-            self.maxdata = 1e10
+            self.maxdata = 100
         else:
             self.maxdata = 1e10
-            # self.maxdata = 2
 
         self.args = args
         self.dataset_configs = dataset_configs
@@ -96,6 +124,17 @@ class MixedDatasetVQ(data.Dataset):
         self.cache_format = cache_format
         self.smpl_path = smpl_path  # Store the path for later use if needed
         self.motion_representation = motion_representation
+        self.lower_with_betas = getattr(self.args, "LOWER_WITH_BETAS", False)
+        self.lower_beta_dim = int(getattr(self.args, "LOWER_BETA_DIM", 10))
+        self.selected_part = kwargs.get("selected_part")
+
+        # Normalization for preprocessed data
+        self.normalization_dir = normalization_dir
+        self.normalize_preprocessed = normalize
+        self.preprocess_mean = None
+        self.preprocess_std = None
+        if normalization_dir and normalize:
+            self._load_normalization_stats(normalization_dir)
 
         # Store kwargs for SMPLX initialization if needed
         if motion_representation == "rotation":
@@ -121,6 +160,22 @@ class MixedDatasetVQ(data.Dataset):
         for config in dataset_configs:
             # dataset_name = config.get("type")
             dataset_name = config.get("name")
+            preprocessed_dir = config.get("preprocessed_dir")
+
+            # Check if this is a preprocessed dataset (has preprocessed_dir field)
+            if preprocessed_dir:
+                base_name = dataset_name.replace("_preprocessed", "")
+                if base_name == "BEAT2" or "BEAT" in base_name.upper():
+                    self._load_preprocessed_beat2(config)
+                    self.data_dict.update(self.data_dict_preprocessed_beat2)
+                    self.metadata.extend(self.metadata_preprocessed_beat2)
+                elif base_name == "AMASS" or "AMASS" in base_name.upper():
+                    self._load_preprocessed_amass(config)
+                    self.data_dict.update(self.data_dict_preprocessed_amass)
+                    self.metadata.extend(self.metadata_preprocessed_amass)
+                else:
+                    print(f"[MixedDatasetVQ] Unknown preprocessed dataset type: {dataset_name}, skipping")
+                continue
 
             if dataset_name == "amass_h3d":
                 self._load_amass_h3d(config)
@@ -168,6 +223,14 @@ class MixedDatasetVQ(data.Dataset):
                 self._load_youtube_talking_synthetic(config)
                 self.data_dict.update(self.data_dict_youtube_talking_synthetic)
                 self.metadata.extend(self.metadata_youtube_talking_synthetic)
+            elif dataset_name == "BEAT2_Genmo":
+                self._load_beat2_genmo(config)
+                self.data_dict.update(self.data_dict_beat2_genmo)
+                self.metadata.extend(self.metadata_beat2_genmo)
+            elif dataset_name == "AMASS_Genmo":
+                self._load_amass_genmo(config)
+                self.data_dict.update(self.data_dict_amass_genmo)
+                self.metadata.extend(self.metadata_amass_genmo)
             else:
                 raise NotImplementedError(f"Unknown dataset name {dataset_name}")
 
@@ -437,6 +500,512 @@ class MixedDatasetVQ(data.Dataset):
                 use_pca=False,
                 ).cuda().eval()
 
+    def _load_normalization_stats(self, normalization_dir):
+        """Load Mean.npy and Std.npy from normalization directory for preprocessed data."""
+        mean_path = os.path.join(normalization_dir, 'Mean.npy')
+        std_path = os.path.join(normalization_dir, 'Std.npy')
+
+        if os.path.exists(mean_path) and os.path.exists(std_path):
+            self.preprocess_mean = np.load(mean_path).astype(np.float32)
+            self.preprocess_std = np.load(std_path).astype(np.float32)
+            # Prevent division by zero
+            self.preprocess_std = np.where(self.preprocess_std < 1e-8, 1.0, self.preprocess_std)
+            print(f"Loaded normalization stats from {normalization_dir}")
+        else:
+            print(f"Warning: Normalization files not found in {normalization_dir}")
+            self.normalize_preprocessed = False
+
+    def _normalize_motion(self, motion):
+        """Apply normalization to preprocessed motion vector."""
+        if self.preprocess_mean is not None and self.preprocess_std is not None:
+            return (motion - self.preprocess_mean) / self.preprocess_std
+        return motion
+
+    def _load_preprocessed_beat2(self, config):
+        """
+        Load preprocessed BEAT2 data from motion_vector npz files.
+
+        Expects data at: <BEAT2.ROOT>/<preprocessed_dir>/<subdirs>/*.npz
+        Each npz contains 'motion_vector' of shape (L, D) where D depends on format (71D or 149D).
+        """
+        # Initialize attributes first to avoid AttributeError if early return
+        self.data_dict_preprocessed_beat2 = {}
+        self.metadata_preprocessed_beat2 = []
+
+        data_root = self.args["BEAT2"].ROOT
+        preprocessed_dir = config.get("preprocessed_dir")
+        subdirs = config.get("subdirs", ["smplxflame_25", "smplxflame_25_mirror"])
+
+        pose_length = int(config.get("pose_length", 64))
+        stride = int(config.get("stride", 20))
+        pose_fps = int(config.get("pose_fps", 25))
+        training_speakers = config.get("training_speakers", list(range(1, 31)))
+        additional_data = config.get("additional_data", False)
+
+        print(f"Loading preprocessed BEAT2 from {pjoin(data_root, preprocessed_dir)}...")
+        modalities = self._get_modalities_for_dataset("BEAT2")
+
+        # Load split info
+        split_rule_path = pjoin(data_root, "train_test_split.csv")
+        if os.path.exists(split_rule_path):
+            split_rule = pd.read_csv(split_rule_path)
+            if self.split == 'token':
+                selected_file = split_rule.loc[
+                    split_rule['id'].str.split("_").str[0].astype(int).isin(training_speakers)
+                ]
+            else:
+                selected_file = split_rule.loc[
+                    (split_rule['type'] == self.split) &
+                    (split_rule['id'].str.split("_").str[0].astype(int).isin(training_speakers))
+                ]
+                if additional_data and self.split == 'train':
+                    additional = split_rule.loc[
+                        (split_rule['type'] == 'additional') &
+                        (split_rule['id'].str.split("_").str[0].astype(int).isin(training_speakers))
+                    ]
+                    selected_file = pd.concat([selected_file, additional])
+            file_ids = set(selected_file['id'].tolist())
+        else:
+            file_ids = None
+
+        for subdir in subdirs:
+            preprocessed_path = pjoin(data_root, preprocessed_dir, subdir)
+            if not os.path.exists(preprocessed_path):
+                print(f"Skipping {preprocessed_path}: directory not found")
+                continue
+
+            npz_files = sorted(Path(preprocessed_path).rglob('*.npz'))
+            for npz_path in tqdm(npz_files, desc=f"Loading BEAT2 preprocessed {subdir}"):
+                file_id = npz_path.stem
+
+                # Skip if not in selected files
+                if file_ids is not None and file_id not in file_ids:
+                    continue
+
+                try:
+                    data = np.load(npz_path, allow_pickle=True)
+                except Exception as e:
+                    print(f"Error loading {npz_path}: {e}")
+                    continue
+
+                has_parts = any(k in data for k in ["upper", "lower", "hand", "face", "face_with_head"])
+                if has_parts:
+                    parts = {
+                        "upper": data["upper"].astype(np.float32) if "upper" in data else None,
+                        "lower": data["lower"].astype(np.float32) if "lower" in data else None,
+                        "hand": data["hand"].astype(np.float32) if "hand" in data else None,
+                        "face": data["face"].astype(np.float32) if "face" in data else None,
+                        "face_with_head": data["face_with_head"].astype(np.float32) if "face_with_head" in data else None,
+                        "trans": data["trans"].astype(np.float32) if "trans" in data else None,
+                        "betas": data["betas"].astype(np.float32) if "betas" in data else None,
+                        "global_orient": data["global_orient"].astype(np.float32) if "global_orient" in data else None,
+                    }
+                    self._segment_preprocessed_parts(
+                        parts=parts,
+                        prefix=f"beat2_preproc_{file_id}",
+                        file_id=file_id,
+                        dataset_name="beat2_preprocessed",
+                        data_dict=self.data_dict_preprocessed_beat2,
+                        metadata=self.metadata_preprocessed_beat2,
+                        pose_length=pose_length,
+                        stride=stride,
+                        pose_fps=pose_fps,
+                        modalities=modalities,
+                    )
+                else:
+                    try:
+                        motion_vector = data['motion_vector'].astype(np.float32)
+                    except Exception as e:
+                        print(f"Error loading {npz_path}: {e}")
+                        continue
+                    self._segment_preprocessed_motion(
+                        motion_vector=motion_vector,
+                        prefix=f"beat2_preproc_{file_id}",
+                        file_id=file_id,
+                        dataset_name="beat2_preprocessed",
+                        data_dict=self.data_dict_preprocessed_beat2,
+                        metadata=self.metadata_preprocessed_beat2,
+                        pose_length=pose_length,
+                        stride=stride,
+                        pose_fps=pose_fps,
+                    )
+
+                if len(self.metadata_preprocessed_beat2) >= self.maxdata:
+                    break
+
+            if len(self.metadata_preprocessed_beat2) >= self.maxdata:
+                break
+
+        print(f"Loaded {len(self.metadata_preprocessed_beat2)} preprocessed BEAT2 segments")
+
+    def _load_preprocessed_amass(self, config):
+        """
+        Load preprocessed AMASS data from motion_vector npz files.
+
+        Expects data at: <AMASS*.ROOT>/<preprocessed_dir>/*.npz
+        Each npz contains 'motion_vector' of shape (L, D) where D depends on format (71D or 149D).
+        """
+        # Initialize attributes first to avoid AttributeError if early return
+        self.data_dict_preprocessed_amass = {}
+        self.metadata_preprocessed_amass = []
+
+        # Get data root - try multiple possible dataset names
+        dataset_name = config.get("name", "").replace("_preprocessed", "")
+        if dataset_name in self.args and hasattr(self.args[dataset_name], "ROOT"):
+            data_root = self.args[dataset_name].ROOT
+        elif "AMASS_Genmo" in self.args:
+            data_root = self.args["AMASS_Genmo"].ROOT
+        elif "AMASS" in self.args:
+            data_root = self.args["AMASS"].ROOT
+        else:
+            print(f"Could not find AMASS ROOT in config")
+            return
+
+        preprocessed_dir = config.get("preprocessed_dir")
+        pose_length = int(config.get("pose_length", 64))
+        stride = int(config.get("stride", 20))
+        pose_fps = int(config.get("pose_fps", 25))
+
+        preprocessed_path = pjoin(data_root, preprocessed_dir)
+        if not os.path.exists(preprocessed_path):
+            print(f"AMASS preprocessed path not found: {preprocessed_path}")
+            return
+
+        print(f"Loading preprocessed AMASS from {preprocessed_path}...")
+        modalities = self._get_modalities_for_dataset(dataset_name)
+
+        # Load train/test split if available
+        split_file = pjoin(data_root, f'{self.split}.txt')
+        if self.split in ['train', 'test'] and os.path.exists(split_file):
+            with cs.open(split_file, "r") as f:
+                file_ids = set(line.strip() for line in f.readlines())
+        else:
+            file_ids = None
+
+        npz_files = sorted(Path(preprocessed_path).rglob('*.npz'))
+        for npz_path in tqdm(npz_files, desc="Loading AMASS preprocessed"):
+            file_id = npz_path.stem
+
+            # Skip if not in selected files
+            if file_ids is not None and file_id not in file_ids:
+                continue
+
+            try:
+                data = np.load(npz_path, allow_pickle=True)
+            except Exception as e:
+                print(f"Error loading {npz_path}: {e}")
+                continue
+
+            has_parts = any(k in data for k in ["upper", "lower", "hand", "face", "face_with_head"])
+            if has_parts:
+                parts = {
+                    "upper": data["upper"].astype(np.float32) if "upper" in data else None,
+                    "lower": data["lower"].astype(np.float32) if "lower" in data else None,
+                    "hand": data["hand"].astype(np.float32) if "hand" in data else None,
+                    "face": data["face"].astype(np.float32) if "face" in data else None,
+                    "face_with_head": data["face_with_head"].astype(np.float32) if "face_with_head" in data else None,
+                    "trans": data["trans"].astype(np.float32) if "trans" in data else None,
+                    "betas": data["betas"].astype(np.float32) if "betas" in data else None,
+                    "global_orient": data["global_orient"].astype(np.float32) if "global_orient" in data else None,
+                }
+                self._segment_preprocessed_parts(
+                    parts=parts,
+                    prefix=f"amass_preproc_{file_id}",
+                    file_id=file_id,
+                    dataset_name="amass_preprocessed",
+                    data_dict=self.data_dict_preprocessed_amass,
+                    metadata=self.metadata_preprocessed_amass,
+                    pose_length=pose_length,
+                    stride=stride,
+                    pose_fps=pose_fps,
+                    modalities=modalities,
+                )
+            else:
+                try:
+                    motion_vector = data['motion_vector'].astype(np.float32)
+                except Exception as e:
+                    print(f"Error loading {npz_path}: {e}")
+                    continue
+                self._segment_preprocessed_motion(
+                    motion_vector=motion_vector,
+                    prefix=f"amass_preproc_{file_id}",
+                    file_id=file_id,
+                    dataset_name="amass_preprocessed",
+                    data_dict=self.data_dict_preprocessed_amass,
+                    metadata=self.metadata_preprocessed_amass,
+                    pose_length=pose_length,
+                    stride=stride,
+                    pose_fps=pose_fps,
+                )
+
+            if len(self.metadata_preprocessed_amass) >= self.maxdata:
+                break
+
+        print(f"Loaded {len(self.metadata_preprocessed_amass)} preprocessed AMASS segments")
+
+    def _segment_preprocessed_parts(
+        self,
+        parts,
+        prefix,
+        file_id,
+        dataset_name,
+        data_dict,
+        metadata,
+        pose_length,
+        stride,
+        pose_fps,
+        modalities=None,
+    ):
+        """Segment preprocessed part-wise data and store in data_dict."""
+        upper = parts.get("upper")
+        lower = parts.get("lower")
+        hand = parts.get("hand")
+        face = parts.get("face")
+        face_with_head = parts.get("face_with_head")
+        betas = parts.get("betas")
+        global_orient = parts.get("global_orient")
+
+        lengths = [
+            arr.shape[0]
+            for arr in [upper, lower, hand, face, face_with_head]
+            if isinstance(arr, np.ndarray) and arr.ndim >= 2
+        ]
+        if not lengths:
+            return
+        n_frames = min(lengths)
+
+        round_seconds = n_frames // pose_fps
+        if round_seconds == 0:
+            round_seconds = 1
+
+        clip_start = 0
+        clip_end = round_seconds * pose_fps
+
+        if self.split in ['test', 'token']:
+            cut_length = clip_end - clip_start
+            segment_stride = cut_length
+        else:
+            segment_stride = stride
+            cut_length = pose_length
+
+        if n_frames < cut_length:
+            num_segments = 1
+            cut_length = n_frames
+        else:
+            num_segments = max(1, (clip_end - clip_start - cut_length) // segment_stride + 1)
+
+        required = set(modalities) if modalities else set()
+        if not required:
+            for key in ["upper", "lower", "hand", "face", "face_with_head"]:
+                arr = parts.get(key)
+                if arr is None:
+                    continue
+                # Avoid pulling in all-zero placeholders when modalities aren't configured.
+                if isinstance(arr, np.ndarray) and np.allclose(arr, 0):
+                    continue
+                required.add(key)
+
+        upper_dim = 78
+        # Preprocessed lower always includes betas (54 pose + 3 vel + 4 contact + betas)
+        lower_dim = 61 + self.lower_beta_dim
+        hand_dim = 180
+        face_dim = 106
+        face_with_head_dim = 112
+        identity_6d = np.array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0], dtype=np.float32)
+
+        def _slice(arr):
+            if arr is None:
+                return None
+            return arr[start_idx:end_idx]
+
+        for i in range(num_segments):
+            start_idx = clip_start + i * segment_stride
+            end_idx = min(start_idx + cut_length, n_frames)
+            if end_idx - start_idx < 2:
+                continue
+
+            segment_name = f"{prefix}_{i}"
+            seg_len = end_idx - start_idx
+
+            entry = {
+                "id": file_id,
+                "dataset_name": dataset_name,
+            }
+
+            if "upper" in required:
+                upper_seg = _slice(upper)
+                if upper_seg is None:
+                    upper_seg = np.zeros((seg_len, upper_dim), dtype=np.float32)
+                entry["upper"] = upper_seg.astype(np.float32)
+
+            if "lower" in required:
+                lower_seg = _slice(lower)
+                if lower_seg is None:
+                    lower_seg = np.zeros((seg_len, lower_dim), dtype=np.float32)
+                entry["lower"] = lower_seg.astype(np.float32)
+
+            if "hand" in required:
+                hand_seg = _slice(hand)
+                if hand_seg is None:
+                    joints = hand_dim // 6
+                    hand_seg = np.tile(identity_6d, joints).reshape(1, -1).repeat(seg_len, axis=0)
+                entry["hand"] = hand_seg.astype(np.float32)
+
+            if "face" in required:
+                face_seg = _slice(face)
+                if face_seg is None and face_with_head is not None:
+                    face_seg = _slice(face_with_head)[:, 6:]
+                if face_seg is None:
+                    face_seg = np.zeros((seg_len, face_dim), dtype=np.float32)
+                    if face_dim >= 6:
+                        face_seg[:, :6] = identity_6d
+                entry["face"] = face_seg.astype(np.float32)
+
+            if "face_with_head" in required:
+                face_head_seg = _slice(face_with_head)
+                if face_head_seg is None and face is not None:
+                    face_head_seg = np.zeros((seg_len, face_with_head_dim), dtype=np.float32)
+                    if face_with_head_dim >= 6:
+                        face_head_seg[:, :6] = identity_6d
+                    face_head_seg[:, 6:] = _slice(face)
+                if face_head_seg is None:
+                    face_head_seg = np.zeros((seg_len, face_with_head_dim), dtype=np.float32)
+                    if face_with_head_dim >= 12:
+                        face_head_seg[:, :6] = identity_6d
+                        face_head_seg[:, 6:12] = identity_6d
+                entry["face_with_head"] = face_head_seg.astype(np.float32)
+
+            # Shape for rendering / losses; translation is derived from local velocity at training time.
+            shape_300d = None
+            beta_dim = self.lower_beta_dim if self.lower_with_betas else 10
+            if lower is not None and lower.shape[-1] >= beta_dim:
+                betas_10d = lower[start_idx:end_idx, -beta_dim:]
+            elif betas is not None:
+                if betas.ndim == 1:
+                    betas_10d = np.tile(betas[:beta_dim], (seg_len, 1))
+                else:
+                    betas_10d = betas[start_idx:end_idx, :beta_dim]
+            else:
+                betas_10d = np.zeros((seg_len, beta_dim), dtype=np.float32)
+
+            shape_300d = np.zeros((seg_len, 300), dtype=np.float32)
+            shape_300d[:, :beta_dim] = betas_10d.astype(np.float32)
+            entry["shape"] = shape_300d
+
+            if global_orient is not None:
+                entry["global_orient"] = global_orient[start_idx:end_idx].astype(np.float32)
+
+            data_dict[segment_name] = entry
+            metadata.append(segment_name)
+
+            if len(metadata) >= self.maxdata:
+                break
+
+    def _segment_preprocessed_motion(
+        self,
+        motion_vector,
+        prefix,
+        file_id,
+        dataset_name,
+        data_dict,
+        metadata,
+        pose_length,
+        stride,
+        pose_fps,
+    ):
+        """Segment preprocessed motion and store in data_dict."""
+        n_frames = motion_vector.shape[0]
+        motion_dim = motion_vector.shape[1]
+
+        # Calculate segment parameters
+        round_seconds = n_frames // pose_fps
+        if round_seconds == 0:
+            round_seconds = 1
+
+        clip_start = 0
+        clip_end = round_seconds * pose_fps
+
+        # Determine stride and cut length based on split
+        if self.split in ['test', 'token']:
+            cut_length = clip_end - clip_start
+            segment_stride = cut_length
+        else:
+            segment_stride = stride
+            cut_length = pose_length
+
+        # Calculate number of segments
+        if n_frames < cut_length:
+            num_segments = 1
+            cut_length = n_frames
+        else:
+            num_segments = max(1, (clip_end - clip_start - cut_length) // segment_stride + 1)
+
+        # Create segments
+        for i in range(num_segments):
+            start_idx = clip_start + i * segment_stride
+            end_idx = min(start_idx + cut_length, n_frames)
+
+            if end_idx - start_idx < 2:
+                continue
+
+            segment = motion_vector[start_idx:end_idx].copy()
+
+            # Apply normalization if enabled
+            if self.normalize_preprocessed and self.preprocess_mean is not None:
+                segment = self._normalize_motion(segment)
+
+            segment_name = f"{prefix}_{i}"
+
+            # Determine output format based on motion dimension
+            # Lower: 71D = pose(54) + vel(3) + contact(4) + betas(10)
+            # Upper+Lower: 149D = upper(78) + pose(54) + vel(3) + contact(4) + betas(10)
+            seg_len = segment.shape[0]
+
+            if motion_dim == 71:
+                # Lower format: full 71D motion vector as 'lower'
+                # Extract betas (last 10D) and expand to 300D for shape
+                betas_10d = segment[:, -10:]
+                shape_300d = np.zeros((seg_len, 300), dtype=np.float32)
+                shape_300d[:, :10] = betas_10d
+                # Trans: zeros (we use local_transl_vel in motion vector)
+                trans = np.zeros((seg_len, 3), dtype=np.float32)
+
+                data_dict[segment_name] = {
+                    'lower': segment,
+                    'shape': shape_300d,
+                    'trans': trans,
+                    'id': file_id,
+                    'dataset_name': dataset_name,
+                }
+            elif motion_dim == 149:
+                # Upper+Lower format: upper (78D) + lower (71D)
+                upper = segment[:, :78]
+                lower = segment[:, 78:]
+                # Extract betas (last 10D of lower) and expand to 300D
+                betas_10d = lower[:, -10:]
+                shape_300d = np.zeros((seg_len, 300), dtype=np.float32)
+                shape_300d[:, :10] = betas_10d
+                # Trans: zeros
+                trans = np.zeros((seg_len, 3), dtype=np.float32)
+
+                data_dict[segment_name] = {
+                    'upper': upper,
+                    'lower': lower,
+                    'shape': shape_300d,
+                    'trans': trans,
+                    'id': file_id,
+                    'dataset_name': dataset_name,
+                }
+            else:
+                # Generic: store as motion_vector
+                data_dict[segment_name] = {
+                    'motion_vector': segment,
+                    'id': file_id,
+                    'dataset_name': dataset_name,
+                }
+
+            metadata.append(segment_name)
+
     def _initialize_flame_if_needed(self):
         """
         Initialize the FLAME model if it hasn't been initialized yet.
@@ -589,10 +1158,21 @@ class MixedDatasetVQ(data.Dataset):
             tar_pose_leg_mirror = tar_pose_mirror[:, self.joint_mask_lower.astype(bool)].reshape(n, 9, 3)
             tar_pose_leg_6d = axis_angle_to_6d_np(tar_pose_leg).reshape(n, 9 * 6)
             tar_pose_leg_6d_mirror = axis_angle_to_6d_np(tar_pose_leg_mirror).reshape(n, 9 * 6)
-            
-            # Convert other data to tensors
-            tar_pose_lower = np.concatenate([tar_pose_leg_6d, tar_trans, tar_contact], axis=1)
-            tar_pose_lower_mirror = np.concatenate([tar_pose_leg_6d_mirror, tar_trans_mirror, tar_contact_mirror], axis=1)
+
+            # Extract global_orient for local velocity computation (pelvis = joint 0)
+            tar_global_orient = tar_pose[:, :3]
+            tar_global_orient_mirror = tar_pose_mirror[:, :3]
+            # Compute local translation velocity (GENMO-style representation)
+            tar_local_transl_vel = get_local_transl_vel(tar_trans, tar_global_orient)
+            tar_local_transl_vel_mirror = get_local_transl_vel(tar_trans_mirror, tar_global_orient_mirror)
+
+            # Convert other data to tensors - use local_transl_vel instead of raw trans
+            tar_pose_lower = np.concatenate([tar_pose_leg_6d, tar_local_transl_vel, tar_contact], axis=1)
+            tar_pose_lower_mirror = np.concatenate([tar_pose_leg_6d_mirror, tar_local_transl_vel_mirror, tar_contact_mirror], axis=1)
+            if self.lower_with_betas:
+                beta_slice = betas[:, :self.lower_beta_dim]
+                tar_pose_lower = np.concatenate([tar_pose_lower, beta_slice], axis=1)
+                tar_pose_lower_mirror = np.concatenate([tar_pose_lower_mirror, beta_slice], axis=1)
             tar_pose_6d = axis_angle_to_6d_np(tar_pose.reshape(n, 55, 3)).reshape(n, 55 * 6)
             tar_pose_6d_mirror = axis_angle_to_6d_np(tar_pose_mirror.reshape(n, 55, 3)).reshape(n, 55 * 6)
 
@@ -675,6 +1255,234 @@ class MixedDatasetVQ(data.Dataset):
         
         # Save processed data to cache
         self._save_to_cache(cache_path, self.data_dict_beat2, self.metadata_beat2, "BEAT2")
+
+    def _load_beat2_genmo(self, config):
+        """
+        Load the BEAT2 GENMO dataset (145-dim motion_vector) based on the configuration.
+        Expects data under: <BEAT2_Genmo.ROOT>/<pose_rep>/<subdir>/*.npz
+        """
+        data_root = self.args["BEAT2_Genmo"].ROOT
+        cache_path = self._get_cache_path(data_root, "BEAT2_Genmo")
+
+        data_dict, metadata = self._load_from_cache(cache_path, "BEAT2_Genmo")
+        if data_dict is not None:
+            self.data_dict_beat2_genmo = data_dict
+            self.metadata_beat2_genmo = metadata
+            return
+
+        print("Processing BEAT2_Genmo dataset...")
+        pose_rep = config.pose_rep
+        pose_root = pjoin(data_root, pose_rep)
+        pose_rep_subdirs = config.get("pose_rep_subdirs", None)
+        if not pose_rep_subdirs:
+            pose_rep_subdirs = ["."]
+
+        self.data_dict_beat2_genmo = {}
+        self.metadata_beat2_genmo = []
+
+        pose_fps = int(config.pose_fps)
+        cut_length = int(config.pose_length)
+        stride = int(config.stride)
+
+        split_rule = pd.read_csv(pjoin(data_root, "train_test_split.csv"))
+        training_speakers = config.get("training_speakers", None)
+        additional_data = config.get("additional_data", False)
+
+        if training_speakers:
+            split_rule = split_rule.loc[
+                split_rule['id'].str.split("_").str[0].astype(int).isin(training_speakers)
+            ]
+
+        if self.split == 'token':
+            selected_file = split_rule
+        else:
+            selected_file = split_rule.loc[split_rule['type'] == self.split]
+            if additional_data:
+                split_b = split_rule.loc[split_rule['type'] == 'additional']
+                selected_file = pd.concat([selected_file, split_b])
+
+        for _, file_row in tqdm(selected_file.iterrows(), desc="BEAT2_Genmo"):
+            f_name = file_row["id"]
+            for subdir in pose_rep_subdirs:
+                is_mirror = "mirror" in str(subdir).lower()
+                file_id = f"M_{f_name}" if is_mirror else f_name
+                pose_file = Path(pose_root) / subdir / f"{file_id}.npz"
+                if not pose_file.exists():
+                    continue
+                try:
+                    data = np.load(pose_file, allow_pickle=True)
+                    if "motion_vector" not in data:
+                        continue
+                    motion_vector = data["motion_vector"].astype(np.float32)
+                    if motion_vector.ndim != 2 or motion_vector.shape[1] < 145:
+                        continue
+                    trans = data["trans"].astype(np.float32) if "trans" in data else None
+                    global_orient = data["global_orient"].astype(np.float32) if "global_orient" in data else None
+                    betas = data["betas"].astype(np.float32) if "betas" in data else None
+
+                    n_frames = motion_vector.shape[0]
+                    round_seconds = n_frames // pose_fps
+                    if round_seconds == 0:
+                        round_seconds = 1
+                    clip_s_f = 0
+                    clip_e_f = round_seconds * pose_fps
+
+                    if self.split in ["test", "token"]:
+                        segment_length = clip_e_f - clip_s_f
+                        segment_stride = segment_length
+                    else:
+                        segment_length = cut_length
+                        segment_stride = stride
+
+                    num_subdivision = math.floor((clip_e_f - clip_s_f - segment_length) / segment_stride) + 1
+                    if num_subdivision < 1:
+                        continue
+
+                    for i in range(num_subdivision):
+                        start_idx = clip_s_f + i * segment_stride
+                        end_idx = start_idx + segment_length
+                        sample_motion = motion_vector[start_idx:end_idx]
+                        if sample_motion.shape[0] == 0:
+                            continue
+                        sample_trans = trans[start_idx:end_idx] if trans is not None else None
+                        sample_global_orient = global_orient[start_idx:end_idx] if global_orient is not None else None
+                        sample_betas = betas[start_idx:end_idx] if betas is not None else None
+
+                        seq_id = f"{file_id}_{i}"
+                        key = f"beat2_genmo_{seq_id}"
+                        entry = {
+                            "motion_vector": sample_motion,
+                            "id": file_id,
+                            "dataset_name": "beat2_genmo",
+                        }
+                        if sample_trans is not None:
+                            entry["trans"] = sample_trans
+                        if sample_global_orient is not None:
+                            entry["global_orient"] = sample_global_orient
+                        if sample_betas is not None:
+                            entry["betas"] = sample_betas
+
+                        self.data_dict_beat2_genmo[key] = entry
+                        self.metadata_beat2_genmo.append(key)
+                except Exception:
+                    continue
+
+                if len(self.metadata_beat2_genmo) >= self.maxdata:
+                    break
+            if len(self.metadata_beat2_genmo) >= self.maxdata:
+                break
+
+        self._save_to_cache(cache_path, self.data_dict_beat2_genmo, self.metadata_beat2_genmo, "BEAT2_Genmo")
+
+    def _load_amass_genmo(self, config):
+        """
+        Load the AMASS GENMO dataset (145-dim motion_vector) based on the configuration.
+        Expects data under: <AMASS_Genmo.ROOT>/<pose_rep>/*.npz
+        """
+        data_root = self.args["AMASS_Genmo"].ROOT
+        cache_path = self._get_cache_path(data_root, "AMASS_Genmo")
+
+        data_dict, metadata = self._load_from_cache(cache_path, "AMASS_Genmo")
+        if data_dict is not None:
+            self.data_dict_amass_genmo = data_dict
+            self.metadata_amass_genmo = metadata
+            return
+
+        print("Processing AMASS_Genmo dataset...")
+        pose_rep = config.pose_rep
+        pose_root = Path(pjoin(data_root, pose_rep))
+
+        self.data_dict_amass_genmo = {}
+        self.metadata_amass_genmo = []
+
+        pose_fps = int(config.pose_fps)
+        cut_length = int(config.pose_length)
+        stride = int(config.stride)
+
+        split_file_train = pjoin(data_root, 'train.txt')
+        split_file_test = pjoin(data_root, 'test.txt')
+        id_list_train = []
+        id_list_test = []
+        with cs.open(split_file_train, "r") as f:
+            for line in f.readlines():
+                id_list_train.append(line.strip())
+        with cs.open(split_file_test, "r") as f:
+            for line in f.readlines():
+                id_list_test.append(line.strip())
+
+        if self.split == 'train':
+            id_list_amass = id_list_train
+        elif self.split == 'test':
+            id_list_amass = id_list_test
+        else:
+            id_list_amass = id_list_train + id_list_test
+
+        for file_name in tqdm(id_list_amass, desc="AMASS_Genmo"):
+            npz_path = pose_root / f"{file_name}.npz"
+            if not npz_path.exists():
+                continue
+            try:
+                data = np.load(npz_path, allow_pickle=True)
+                if "motion_vector" not in data:
+                    continue
+                motion_vector = data["motion_vector"].astype(np.float32)
+                if motion_vector.ndim != 2 or motion_vector.shape[1] < 145:
+                    continue
+                trans = data["trans"].astype(np.float32) if "trans" in data else None
+                global_orient = data["global_orient"].astype(np.float32) if "global_orient" in data else None
+                betas = data["betas"].astype(np.float32) if "betas" in data else None
+
+                n_frames = motion_vector.shape[0]
+                round_seconds = n_frames // pose_fps
+                if round_seconds == 0:
+                    round_seconds = 1
+                clip_s_f = 0
+                clip_e_f = round_seconds * pose_fps
+
+                if self.split in ["test", "token"]:
+                    segment_length = clip_e_f - clip_s_f
+                    segment_stride = segment_length
+                else:
+                    segment_length = cut_length
+                    segment_stride = stride
+
+                num_subdivision = math.floor((clip_e_f - clip_s_f - segment_length) / segment_stride) + 1
+                if num_subdivision < 1:
+                    continue
+
+                for i in range(num_subdivision):
+                    start_idx = clip_s_f + i * segment_stride
+                    end_idx = start_idx + segment_length
+                    sample_motion = motion_vector[start_idx:end_idx]
+                    if sample_motion.shape[0] == 0:
+                        continue
+                    sample_trans = trans[start_idx:end_idx] if trans is not None else None
+                    sample_global_orient = global_orient[start_idx:end_idx] if global_orient is not None else None
+                    sample_betas = betas[start_idx:end_idx] if betas is not None else None
+
+                    seq_id = f"{file_name}_{i}"
+                    key = f"amass_genmo_{seq_id}"
+                    entry = {
+                        "motion_vector": sample_motion,
+                        "id": file_name,
+                        "dataset_name": "amass_genmo",
+                    }
+                    if sample_trans is not None:
+                        entry["trans"] = sample_trans
+                    if sample_global_orient is not None:
+                        entry["global_orient"] = sample_global_orient
+                    if sample_betas is not None:
+                        entry["betas"] = sample_betas
+
+                    self.data_dict_amass_genmo[key] = entry
+                    self.metadata_amass_genmo.append(key)
+            except Exception:
+                continue
+
+            if len(self.metadata_amass_genmo) >= self.maxdata:
+                break
+
+        self._save_to_cache(cache_path, self.data_dict_amass_genmo, self.metadata_amass_genmo, "AMASS_Genmo")
 
     def _load_candor(self, config):
         """
@@ -1404,10 +2212,18 @@ class MixedDatasetVQ(data.Dataset):
                 # Extract and convert lower body pose data
                 tar_pose_leg = tar_pose[:, self.joint_mask_lower.astype(bool)].reshape(n, 9, 3)
                 tar_pose_leg_6d = axis_angle_to_6d_np(tar_pose_leg).reshape(n, 9 * 6)
-                
-                # Combine lower body pose with translation and contacts
-                tar_pose_lower = np.concatenate([tar_pose_leg_6d, tar_trans, tar_contact], axis=1)
-                
+
+                # Extract global_orient for local velocity computation (pelvis = joint 0)
+                tar_global_orient = tar_pose[:, :3]
+                # Compute local translation velocity (GENMO-style representation)
+                tar_local_transl_vel = get_local_transl_vel(tar_trans, tar_global_orient)
+
+                # Combine lower body pose with local velocity and contacts
+                tar_pose_lower = np.concatenate([tar_pose_leg_6d, tar_local_transl_vel, tar_contact], axis=1)
+                if self.lower_with_betas:
+                    beta_slice = betas[:, :self.lower_beta_dim]
+                    tar_pose_lower = np.concatenate([tar_pose_lower, beta_slice], axis=1)
+
                 # # Convert full pose to 6D representation
                 tar_pose_6d = axis_angle_to_6d_np(tar_pose.reshape(n, 55, 3)).reshape(n, 55, 6)
 
@@ -1417,7 +2233,7 @@ class MixedDatasetVQ(data.Dataset):
                     round_seconds_skeleton = 1
                 clip_s_t, clip_e_t = 0, round_seconds_skeleton - 0
                 clip_s_f_pose, clip_e_f_pose = clip_s_t * pose_fps_amass, clip_e_t * pose_fps_amass
-            
+
                 if self.split == 'test' or self.split == 'token':  # stride = length for test
                     cut_length = clip_e_f_pose - clip_s_f_pose
                     stride = cut_length
@@ -1630,7 +2446,7 @@ class MixedDatasetVQ(data.Dataset):
                     # Concatenate head pose, jaw pose and expressions for 112D face representation
                     tar_pose_face = np.concatenate([jaw_pose_6d, face_expressions], axis=1)
                     tar_pose_face_with_head = np.concatenate([head_pose_6d, jaw_pose_6d, face_expressions], axis=1)
-                
+
                 # Extract and convert hand pose data
                 tar_pose_hands_6d = np.zeros((n, 180))
                 # Extract and convert upper body pose data
@@ -1640,10 +2456,18 @@ class MixedDatasetVQ(data.Dataset):
                 # Extract and convert lower body pose data
                 tar_pose_leg = tar_pose[:, self.joint_mask_lower.astype(bool)].reshape(n, 9, 3)
                 tar_pose_leg_6d = axis_angle_to_6d_np(tar_pose_leg).reshape(n, 9 * 6)
-                
-                # Combine lower body pose with translation and contacts
-                tar_pose_lower = np.concatenate([tar_pose_leg_6d, tar_trans, tar_contact], axis=1)
-                
+
+                # Extract global_orient for local velocity computation (pelvis = joint 0)
+                tar_global_orient = tar_pose[:, :3]
+                # Compute local translation velocity (GENMO-style representation)
+                tar_local_transl_vel = get_local_transl_vel(tar_trans, tar_global_orient)
+
+                # Combine lower body pose with local velocity and contacts
+                tar_pose_lower = np.concatenate([tar_pose_leg_6d, tar_local_transl_vel, tar_contact], axis=1)
+                if self.lower_with_betas:
+                    beta_slice = betas[:, :self.lower_beta_dim]
+                    tar_pose_lower = np.concatenate([tar_pose_lower, beta_slice], axis=1)
+
                 # # Convert full pose to 6D representation
                 tar_pose_6d = axis_angle_to_6d_np(tar_pose.reshape(n, 55, 3)).reshape(n, 55, 6)
 
@@ -1852,10 +2676,18 @@ class MixedDatasetVQ(data.Dataset):
                 # Extract and convert lower body pose data
                 tar_pose_leg = tar_pose[:, self.joint_mask_lower.astype(bool)].reshape(n, 9, 3)
                 tar_pose_leg_6d = axis_angle_to_6d_np(tar_pose_leg).reshape(n, 9 * 6)
-                
-                # Combine lower body pose with translation and contacts
-                tar_pose_lower = np.concatenate([tar_pose_leg_6d, tar_trans, tar_contact], axis=1)
-                
+
+                # Extract global_orient for local velocity computation (pelvis = joint 0)
+                tar_global_orient = tar_pose[:, :3]
+                # Compute local translation velocity (GENMO-style representation)
+                tar_local_transl_vel = get_local_transl_vel(tar_trans, tar_global_orient)
+
+                # Combine lower body pose with local velocity and contacts
+                tar_pose_lower = np.concatenate([tar_pose_leg_6d, tar_local_transl_vel, tar_contact], axis=1)
+                if self.lower_with_betas:
+                    beta_slice = betas[:, :self.lower_beta_dim]
+                    tar_pose_lower = np.concatenate([tar_pose_lower, beta_slice], axis=1)
+
                 # # Convert full pose to 6D representation
                 tar_pose_6d = axis_angle_to_6d_np(tar_pose.reshape(n, 55, 3)).reshape(n, 55, 6)
 
@@ -2032,6 +2864,96 @@ class MixedDatasetVQ(data.Dataset):
         """
         return len(self.metadata)
 
+    def _normalize_dataset_name(self, name):
+        if name is None:
+            return ""
+        name = str(name).lower().replace(" ", "").replace("-", "_")
+        name_map = {
+            "beat2_genmo": "beat2_genmo",
+            "amass_genmo": "amass_genmo",
+            "beat2": "beat2",
+            "amass": "amass",
+            "amass_talking": "amass_talking",
+            "amass_p2p": "amass_p2p",
+            "candor": "candor",
+            "tfhp": "tfhp",
+            "youtube_talking": "youtube_talking",
+            "youtube_talking_synthetic": "youtube_talking_synthetic",
+        }
+        return name_map.get(name, name)
+
+    def _get_modalities_for_dataset(self, dataset_key):
+        """Return a set of requested modalities for a dataset key, or None if not configured."""
+        modalities_cfg = None
+        if hasattr(self.args, "DATASET"):
+            modalities_cfg = getattr(self.args.DATASET, "MODALITIES", None)
+        if modalities_cfg is None:
+            modalities_cfg = getattr(self.args, "MODALITIES", None)
+        if modalities_cfg is None:
+            return None
+
+        def _lookup(key):
+            if hasattr(modalities_cfg, "get"):
+                return modalities_cfg.get(key)
+            if isinstance(modalities_cfg, dict):
+                return modalities_cfg.get(key)
+            return getattr(modalities_cfg, key, None)
+
+        normalized = self._normalize_dataset_name(dataset_key)
+        candidates = [
+            dataset_key,
+            str(dataset_key).upper(),
+            str(dataset_key).lower(),
+            normalized,
+            normalized.upper(),
+        ]
+        dataset_modalities = None
+        for key in candidates:
+            dataset_modalities = _lookup(key)
+            if dataset_modalities is not None:
+                break
+        if dataset_modalities is None:
+            return None
+        return {str(modality).lower() for modality in dataset_modalities}
+
+    def get_sampling_weights(self, sampling_ratio):
+        """
+        Build per-sample weights for WeightedRandomSampler using dataset-level ratios.
+        sampling_ratio: dict like {"BEAT2_Genmo": 1.0, "AMASS_Genmo": 1.0}
+        """
+        if not sampling_ratio:
+            return None
+
+        ratio = {}
+        for key, value in sampling_ratio.items():
+            if value is None:
+                continue
+            name = self._normalize_dataset_name(key)
+            try:
+                ratio[name] = float(value)
+            except (TypeError, ValueError):
+                continue
+
+        if not ratio:
+            return None
+
+        dataset_counts = {}
+        for sample_key in self.metadata:
+            ds_name = self._normalize_dataset_name(self.data_dict[sample_key].get("dataset_name", ""))
+            dataset_counts[ds_name] = dataset_counts.get(ds_name, 0) + 1
+
+        if not dataset_counts:
+            return None
+
+        weights = np.zeros(len(self.metadata), dtype=np.float64)
+        for idx, sample_key in enumerate(self.metadata):
+            ds_name = self._normalize_dataset_name(self.data_dict[sample_key].get("dataset_name", ""))
+            count = dataset_counts.get(ds_name, 1)
+            ds_ratio = ratio.get(ds_name, 1.0)
+            weights[idx] = ds_ratio / max(count, 1)
+
+        return torch.as_tensor(weights, dtype=torch.double)
+
     def __getitem__(self, item):
         """
         Retrieves a sample from the dataset based on the given index.
@@ -2066,13 +2988,23 @@ class MixedDatasetVQ(data.Dataset):
         # # Get motion length from the pose data
         # motion_len_1 = formatted_data['face_p1'].shape[0] if 'face_p1' in formatted_data else 0
         # motion_len_2 = formatted_data['face_p2'].shape[0] if 'face_p2' in formatted_data else 0
-        # Get motion length from the pose data
-        if 'upper' in formatted_data:
-            motion_len = formatted_data['upper'].shape[0]
+        # Get motion length from available modality
+        if "motion_vector" in formatted_data:
+            motion_len = formatted_data["motion_vector"].shape[0]
+        elif "upper" in formatted_data:
+            motion_len = formatted_data["upper"].shape[0]
+        elif "lower" in formatted_data:
+            motion_len = formatted_data["lower"].shape[0]
+        elif "lower_54" in formatted_data:
+            motion_len = formatted_data["lower_54"].shape[0]
+        elif "face" in formatted_data:
+            motion_len = formatted_data["face"].shape[0]
         else:
-            motion_len = formatted_data['face'].shape[0]
-        collate_key = "vq_mixed"
-        if "face_p2" in formatted_data:
+            motion_len = 0
+
+        if "motion_vector" in formatted_data:
+            collate_key = "vq_genmo"
+        elif "face_p2" in formatted_data:
             collate_key = "vq_face_pairs"
         elif "face_p1" in formatted_data:
             collate_key = "vq_face_single"
@@ -2092,12 +3024,19 @@ class MixedDatasetVQ(data.Dataset):
             else:
                 collate_key = "vq_unknown"
 
+        if self.selected_part == "upper_lower_global":
+            collate_key = "vq_upper_lower"
+        elif self.selected_part in {"lower_global", "lower", "lower_54"}:
+            collate_key = "vq_lower"
+        elif self.selected_part == "global":
+            collate_key = "vae_global"
+
         # Add additional information
         formatted_data.update({
             "id_name": formatted_data.get('id', ""),
             "dataset_name": formatted_data.get('dataset_name', ""),
             "split_name": "vq",
-            "select_part": "compositional",
+            "select_part": "full_genmo" if "motion_vector" in formatted_data else "compositional",
             "motion_len": motion_len,
             "collate_key": collate_key,
             # "motion_len_1": motion_len_1,

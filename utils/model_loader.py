@@ -41,6 +41,50 @@ def extract_state_dict_keys(state_dict: dict, prefix: str) -> dict:
     return extracted
 
 
+def _is_state_dict(maybe_state_dict: dict) -> bool:
+    if not isinstance(maybe_state_dict, dict):
+        return False
+    for value in maybe_state_dict.values():
+        if isinstance(value, torch.Tensor):
+            return True
+    return False
+
+
+def _extract_state_dict(checkpoint: dict, checkpoint_path: str = "") -> dict:
+    if isinstance(checkpoint, dict):
+        if "state_dict" in checkpoint:
+            return checkpoint["state_dict"]
+        if "model_state" in checkpoint:
+            return checkpoint["model_state"]
+        if _is_state_dict(checkpoint):
+            return checkpoint
+    raise KeyError(f"Missing state_dict in checkpoint: {checkpoint_path}")
+
+
+def _load_module_state(module: torch.nn.Module, state_dict: dict, prefix: str) -> None:
+    """
+    Load a module state dict with prefix stripping + safe fallback.
+    """
+    extracted = extract_state_dict_keys(state_dict, prefix)
+    if extracted:
+        module.load_state_dict(extracted, strict=True)
+        return
+
+    module_keys = set(module.state_dict().keys())
+    if all(k in module_keys for k in state_dict.keys()):
+        module.load_state_dict(state_dict, strict=True)
+        return
+
+    filtered = {k: v for k, v in state_dict.items() if k in module_keys}
+    if not filtered:
+        raise RuntimeError(
+            f"No matching keys found for module when loading state dict. "
+            f"Checkpoint keys (first 5): {list(state_dict.keys())[:5]}, "
+            f"Module keys (first 5): {list(module_keys)[:5]}"
+        )
+    module.load_state_dict(filtered, strict=False)
+
+
 def load_vae_models(
     device: torch.device,
     checkpoint_main: str,
@@ -113,23 +157,17 @@ def load_vae_models(
     checkpoint_global_data = torch.load(checkpoint_global, map_location="cpu", weights_only=False)
     
     # Extract state dictionaries
-    state_dict_old = checkpoint['state_dict']
-    state_dict_face_old = checkpoint_face_data['state_dict']
-    state_dict_global_old = checkpoint_global_data['state_dict']
+    state_dict_old = _extract_state_dict(checkpoint, checkpoint_main)
+    state_dict_face_old = _extract_state_dict(checkpoint_face_data, checkpoint_face)
+    state_dict_global_old = _extract_state_dict(checkpoint_global_data, checkpoint_global)
     
     # Extract and rename state dict keys
-    state_dict_face = extract_state_dict_keys(state_dict_face_old, 'vae_face')
-    state_dict_upper = extract_state_dict_keys(state_dict_old, 'vae_upper')
-    state_dict_lower = extract_state_dict_keys(state_dict_old, 'vae_lower')
-    state_dict_hand = extract_state_dict_keys(state_dict_old, 'vae_hand')
-    state_dict_global = extract_state_dict_keys(state_dict_global_old, 'vae_global')
-    
-    # Load state dictionaries
-    vae_face.load_state_dict(state_dict_face, strict=True)
-    vae_upper.load_state_dict(state_dict_upper, strict=True)
-    vae_lower.load_state_dict(state_dict_lower, strict=True)
-    vae_global.load_state_dict(state_dict_global, strict=True)
-    vae_hand.load_state_dict(state_dict_hand, strict=True)
+    # Load state dictionaries (supports checkpoints with/without state_dict wrapper)
+    _load_module_state(vae_face, state_dict_face_old, "vae_face")
+    _load_module_state(vae_upper, state_dict_old, "vae_upper")
+    _load_module_state(vae_lower, state_dict_old, "vae_lower")
+    _load_module_state(vae_hand, state_dict_old, "vae_hand")
+    _load_module_state(vae_global, state_dict_global_old, "vae_global")
     
     # Set to evaluation mode and move to device
     for vae in [vae_face, vae_upper, vae_lower, vae_global, vae_hand]:
@@ -182,4 +220,3 @@ def load_smplx_model(
     ).to(device).eval()
     
     return smplx_model
-

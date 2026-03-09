@@ -1,0 +1,582 @@
+#!/usr/bin/env python3
+"""
+Inference script for Audio-to-Motion Body generation.
+
+This script generates full-body motion sequences from text prompts using a multimodal
+generative model. It combines text-to-speech, motion token generation, and 3D pose
+reconstruction to produce animated video outputs with synchronized audio.
+
+Features:
+- Text-to-motion generation with audio synthesis
+- Multi-modal token extraction and decoding
+- VAE-based motion reconstruction for different body parts
+- SMPLX mesh generation and video rendering
+
+Usage:
+    # Recommended: Run from project root directory
+    python -m inference.inference_expertnum2_a2m_body \\
+        --checkpoint <path_to_checkpoint> \\
+        --user_text "Your text prompt here" \\
+        --output_dir ./output
+    
+    # Alternative: Run directly from inference/ directory
+    cd inference
+    python inference_expertnum2_a2m_body.py \\
+        --checkpoint <path_to_checkpoint> \\
+        --user_text "Your text prompt here" \\
+        --output_dir ./output
+"""
+import sys
+import os
+import argparse
+import uuid
+
+# Setup sys.path before other imports
+# Ensure we get the project root directory regardless of where the script is run from
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.abspath(os.path.join(_script_dir, ".."))
+
+# Validate that ROOT_DIR is correct (should contain utils directory)
+if not os.path.exists(os.path.join(ROOT_DIR, "utils")):
+    raise RuntimeError(
+        f"Cannot find 'utils' directory in project root. "
+        f"Expected at: {os.path.join(ROOT_DIR, 'utils')}. "
+        f"Please run this script from the project root or inference directory."
+    )
+
+# Force ROOT_DIR to be at the beginning of sys.path (remove and re-insert to ensure priority)
+if ROOT_DIR in sys.path:
+    sys.path.remove(ROOT_DIR)
+sys.path.insert(0, ROOT_DIR)
+
+# Add conversational_agent directory to sys.path for conver_agent imports
+# This enables imports like: from conver_agent.archs.lom_vq import ...
+# This is needed when using conda activate conver_agent environment
+# Path resolution priority:
+#   1) CONVERSATIONAL_AGENT_DIR environment variable (if set)
+#   2) Relative path from project root (../conversational_agent)
+#   3) Default absolute path as fallback
+_conversational_agent_dir_env = os.getenv('CONVERSATIONAL_AGENT_DIR')
+if _conversational_agent_dir_env and os.path.exists(_conversational_agent_dir_env):
+    CONVERSATIONAL_AGENT_DIR = _conversational_agent_dir_env
+else:
+    _relative_path = os.path.join(os.path.dirname(ROOT_DIR), 'conversational_agent')
+    CONVERSATIONAL_AGENT_DIR = _relative_path if os.path.exists(_relative_path) else '/simurgh/u/juze/code/conversational_agent'
+
+if os.path.exists(CONVERSATIONAL_AGENT_DIR):
+    if CONVERSATIONAL_AGENT_DIR in sys.path:
+        sys.path.remove(CONVERSATIONAL_AGENT_DIR)
+    sys.path.insert(1, CONVERSATIONAL_AGENT_DIR)  # Insert at position 1, after ROOT_DIR
+
+# Add speech_related subdirectories to sys.path
+cosyvoice_path = os.path.join(ROOT_DIR, "speech_related", "cosyvoice")
+matcha_path = os.path.join(ROOT_DIR, "speech_related", "Matcha-TTS")
+if os.path.exists(cosyvoice_path):
+    if cosyvoice_path in sys.path:
+        sys.path.remove(cosyvoice_path)
+    sys.path.insert(0, cosyvoice_path)
+if os.path.exists(matcha_path):
+    if matcha_path in sys.path:
+        sys.path.remove(matcha_path)
+    sys.path.insert(0, matcha_path)
+
+# Import external dependencies first
+import torch
+import torch.nn.functional as F
+import numpy as np
+from tqdm import tqdm
+from transformers import (
+    AutoTokenizer,
+    AutoModel,
+    AutoConfig
+)
+from transformers.modeling_utils import load_sharded_checkpoint
+
+from speech_related.flow_inference import AudioDecoder
+from multimodal_tokenizers.utils.rotation_conversions import axis_angle_to_6d
+from multimodal_tokenizers.utils.other_tools import velocity2position
+from multimodal_tokenizers.utils.renderer_utils import RenderBodyMesh
+from multimodal_tokenizers.utils.utils_videos import write_video
+
+# Re-ensure ROOT_DIR is at the front of sys.path after other imports
+# (some imports may modify sys.path, so we need to re-assert priority)
+if ROOT_DIR in sys.path:
+    sys.path.remove(ROOT_DIR)
+sys.path.insert(0, ROOT_DIR)
+
+# Now import project-local utils modules (after dependencies, but with path re-asserted)
+from utils.token_utils import extract_modality_tokens_from_response
+from utils.tensor_utils import apply_body_token_offset
+from utils.model_loader import load_vae_models, load_smplx_model
+from utils.motion_reconstruction import reconstruct_full_body_pose
+from utils.inference_utils import prepare_modality_masks, create_prompt
+
+# ============================================================================
+# Constants
+# ============================================================================
+
+# Token ID constants
+BODY_TOKEN_OFFSET = 168736  # Offset for body motion tokens in vocabulary
+
+# Motion and audio constants
+MOTION_FPS = 25  # Frames per second for motion sequences
+AUDIO_OUTPUT_SAMPLE_RATE = 22050  # Audio sample rate in Hz
+
+# SMPLX model constants
+SMPLX_NUM_BETAS = 300  # Number of shape parameters in SMPLX model
+SMPLX_NUM_EXPRESSIONS = 100  # Number of facial expression parameters
+SMPLX_NUM_JOINTS = 55  # Number of joints in the skeleton
+SMPLX_NUM_DIMS_PER_JOINT = 3  # Dimension per joint (axis-angle rotation)
+
+# Motion feature dimensions
+FACE_FEATURE_DIM = 112  # Total dimension of face features
+FACE_EXPRESSION_START_IDX = 12  # Starting index for facial expressions
+FACE_JAW_POSE_START_IDX = 6  # Starting index for jaw pose
+FACE_JAW_POSE_END_IDX = 12  # Ending index for jaw pose
+LOWER_BODY_FEATURE_DIM = 54  # Dimension of lower body motion features
+GLOBAL_TRANSLATION_START_IDX = 54  # Starting index for global translation
+GLOBAL_TRANSLATION_END_IDX = 57  # Ending index for global translation
+GLOBAL_FEATURE_PADDING = 7  # Padding size for global motion features
+
+# Audio processing constants
+AUDIO_MEL_DIM = 80  # Mel-spectrogram dimension for audio prompts
+
+# Pose reconstruction indices (SMPLX joint structure)
+# These indices correspond to specific joints in the 55-joint skeleton
+POSE_JAW_INDICES = (66, 69)  # Jaw joint indices
+POSE_GLOBAL_ORIENT_INDICES = (0, 3)  # Global orientation indices
+POSE_BODY_START_IDX = 3  # Body pose starts after global orientation
+POSE_BODY_END_IDX = 21 * SMPLX_NUM_DIMS_PER_JOINT + POSE_BODY_START_IDX  # Body pose end
+POSE_LEFT_HAND_START_IDX = 25 * SMPLX_NUM_DIMS_PER_JOINT  # Left hand start
+POSE_LEFT_HAND_END_IDX = 40 * SMPLX_NUM_DIMS_PER_JOINT  # Left hand end
+POSE_RIGHT_HAND_START_IDX = 40 * SMPLX_NUM_DIMS_PER_JOINT  # Right hand start
+POSE_RIGHT_HAND_END_IDX = 55 * SMPLX_NUM_DIMS_PER_JOINT  # Right hand end
+POSE_LEFT_EYE_INDICES = (69, 72)  # Left eye pose indices
+POSE_RIGHT_EYE_INDICES = (72, 75)  # Right eye pose indices
+
+# Video rendering constants
+RENDER_IMAGE_SIZE = 512  # Output image size for video rendering
+RENDER_SCALE = 6.0  # Scale factor for mesh rendering
+VIDEO_COLOR_SCALE = 255.0  # Color scale for video output (0-255 range)
+
+# VAE model paths
+VAE_CHECKPOINT_MAIN = './model_files/pretrained_cpt/lom_vq_ds_new/lom_vq.ckpt'
+VAE_CHECKPOINT_FACE = os.path.join(CONVERSATIONAL_AGENT_DIR, 'model_files/pretrained_cpt/lom_vq_ds_new/face/epoch=29.ckpt')
+VAE_CHECKPOINT_GLOBAL = os.path.join(CONVERSATIONAL_AGENT_DIR, 'model_files/pretrained_cpt/lom_vq_ds_new/global_25/epoch=659.pth')
+
+# SMPLX model path
+SMPLX_MODEL_DIR = os.environ.get(
+    'VIBES_SMPLX_MODEL_DIR',
+    os.path.join(ROOT_DIR, 'model_files', 'smplx_models'),
+)
+
+# Audio decoder paths
+AUDIO_DECODER_CONFIG = os.path.join(ROOT_DIR, "speech_related", "glm-4-voice-decoder", "config.yaml")
+AUDIO_DECODER_FLOW = os.path.join(ROOT_DIR, "speech_related", "glm-4-voice-decoder", 'flow.pt')
+AUDIO_DECODER_HIFT = os.path.join(ROOT_DIR, "speech_related", "glm-4-voice-decoder", 'hift.pt')
+
+# Model configuration
+NUM_MODALITIES = 3  # Number of modalities: text, audio, motion
+MODALITY_BODY_IDX = 2  # Index of body motion modality
+
+# ============================================================================
+# Main Generation Function
+# ============================================================================
+
+def generate_motion_from_text(
+    model,
+    tokenizer,
+    device,
+    user_text="If you had a superpower for one day, what would you choose?",
+    output_dir="./demo",
+    output_filename="response.mp4",
+    max_new_tokens=1024,
+    temperature=0.0,
+    top_p=0.1
+):
+    """Generate motion and audio from text prompt using the trained model.
+    
+    This function performs the complete pipeline:
+    1. Loads VAE models for motion decoding
+    2. Tokenizes input text and generates multimodal tokens
+    3. Decodes audio tokens to waveform
+    4. Decodes motion tokens to 3D poses
+    5. Reconstructs full body pose using SMPLX model
+    6. Renders video with synchronized audio
+    
+    Args:
+        model: The trained multimodal generative model
+        tokenizer: Tokenizer for the model vocabulary
+        device: Computing device (cuda/cpu)
+        user_text: User input text prompt
+        output_dir: Directory to save output video
+        output_filename: Output video filename
+        max_new_tokens: Maximum number of tokens to generate
+        temperature: Sampling temperature (0.0 = deterministic)
+        top_p: Top-p (nucleus) sampling parameter
+        
+    Returns:
+        bool: True if generation succeeded
+    """
+    print(f"\n=== Step 4: Generate Motion from Text ===")
+
+    # Load SMPLX body model for pose reconstruction
+    smplx_2020 = load_smplx_model(SMPLX_MODEL_DIR, device)
+
+    # Load VAE models for different body parts
+    vae_face, vae_upper, vae_lower, vae_global, vae_hand = load_vae_models(
+        device,
+        VAE_CHECKPOINT_MAIN,
+        VAE_CHECKPOINT_FACE,
+        VAE_CHECKPOINT_GLOBAL
+    )
+
+    # Prepare input prompt with proper formatting
+    prompt = create_prompt(user_text)
+
+    # Tokenize input text
+    inputs = tokenizer([prompt], return_tensors="pt").to(device)
+    print(f"Starting generation...")
+    original_text = tokenizer.decode(inputs['input_ids'][0], skip_special_tokens=False)
+    print(f"Original text: {original_text}")
+
+    # Prepare modality masks for multimodal generation
+    batch_size, seq_len = inputs.input_ids.shape[0], inputs.input_ids.shape[1]
+    modality_masks_original, position_encoding_indices = prepare_modality_masks(
+        batch_size, seq_len, num_modalities=NUM_MODALITIES, device=inputs.input_ids.device
+    )
+
+    # Generate multimodal tokens (text, audio, motion)
+    with torch.no_grad():
+        output_ids, output_modality_masks = model.generate(
+            input_ids=inputs.input_ids,
+            attention_mask=inputs.attention_mask,
+            max_new_tokens=max_new_tokens,
+            do_sample=True,
+            temperature=temperature,
+            top_p=top_p,
+            modality_masks=modality_masks_original,
+            use_cache=True,
+            position_encoding_indices=position_encoding_indices,
+            body_part="body"
+        )
+
+    # Apply body token offset to correct token IDs
+    output_ids = apply_body_token_offset(
+        output_ids,
+        output_modality_masks,
+        BODY_TOKEN_OFFSET,
+        modality_idx=MODALITY_BODY_IDX
+    )
+
+    # Decode generated tokens back to text for inspection
+    full_response = tokenizer.decode(output_ids[0], skip_special_tokens=False)
+    print(full_response)
+    
+    # Extract tokens for each modality from the generated response
+    modality_tokens = extract_modality_tokens_from_response(full_response)
+    audio_tokens = modality_tokens['audio']
+    face_tokens = modality_tokens['face']
+    upper_tokens = modality_tokens['upper']
+    lower_tokens = modality_tokens['lower']
+    hand_tokens = modality_tokens['hand']
+
+    # ========================================================================
+    # Audio Decoding
+    # ========================================================================
+    
+    # Prepare audio decoder with empty prompts for zero-shot generation
+    this_uuid = str(uuid.uuid4())
+    prompt_speech_feat = torch.zeros(1, 0, AUDIO_MEL_DIM).to(device)
+    flow_prompt_speech_token = torch.zeros(1, 0, dtype=torch.int64).to(device)
+    
+    audio_decoder = AudioDecoder(
+        config_path=AUDIO_DECODER_CONFIG,
+        flow_ckpt_path=AUDIO_DECODER_FLOW,
+        hift_ckpt_path=AUDIO_DECODER_HIFT,
+        device=device
+    )
+
+    # Decode audio tokens to waveform
+    tts_token = torch.tensor(audio_tokens, device=device).unsqueeze(0)
+    tts_speech, tts_mel = audio_decoder.token2wav(
+        tts_token,
+        uuid=this_uuid,
+                                                prompt_token=flow_prompt_speech_token.to(device),
+                                                prompt_feat=prompt_speech_feat.to(device),
+        finalize=True
+    )
+    final_speech = tts_speech[0].cpu()
+
+    # ========================================================================
+    # Motion Token Decoding
+    # ========================================================================
+    
+    # Convert token lists to tensors and decode using VAE models
+    face_token_tensor = torch.tensor(face_tokens, device=device).unsqueeze(0)
+    upper_token_tensor = torch.tensor(upper_tokens, device=device).unsqueeze(0)
+    lower_token_tensor = torch.tensor(lower_tokens, device=device).unsqueeze(0)
+    hand_token_tensor = torch.tensor(hand_tokens, device=device).unsqueeze(0)
+    
+    # Decode motion tokens to continuous features using VAE decoders
+    rec_upper = vae_upper.decode(upper_token_tensor.int())
+    rec_lower = vae_lower.decode(lower_token_tensor.int())
+    rec_hand = vae_hand.decode(hand_token_tensor.int())
+    
+    # Align sequence lengths across different body parts
+    n = min(rec_upper.shape[1], rec_lower.shape[1], rec_hand.shape[1])
+    rec_upper = rec_upper[:, :n, :]
+    rec_lower = rec_lower[:, :n, :LOWER_BODY_FEATURE_DIM]
+    rec_hand = rec_hand[:, :n, :]
+
+    # ========================================================================
+    # Full Body Pose Reconstruction
+    # ========================================================================
+    
+    # Initialize face features (currently zeros, as face tokens are not decoded)
+    pose_batch_size = 1
+    rec_face = torch.zeros(pose_batch_size, n, FACE_FEATURE_DIM, device=device, dtype=torch.float32)
+    rec_exps = rec_face[:, :, FACE_EXPRESSION_START_IDX:]
+    rec_pose_jaw = rec_face[:, :, FACE_JAW_POSE_START_IDX:FACE_JAW_POSE_END_IDX]
+    
+    # Re-align sequences after face feature extraction
+    n = min(rec_pose_jaw.shape[1], rec_upper.shape[1], rec_lower.shape[1])
+    rec_face = rec_face[:, :n, :]
+    rec_upper = rec_upper[:, :n, :]
+    rec_lower = rec_lower[:, :n, :]
+    rec_pose_jaw = rec_pose_jaw[:, :n, :]
+    rec_exps = rec_exps[:, :n, :]
+
+    # Reconstruct full body pose from parts
+    rec_pose, rec_lower2global = reconstruct_full_body_pose(
+        rec_upper, rec_lower, rec_pose_jaw, pose_batch_size, n, device
+    )
+
+    # ========================================================================
+    # Global Motion Processing
+    # ========================================================================
+    
+    # Prepare lower body features for global motion VAE
+    to_global = rec_lower
+    if to_global.shape[2] == LOWER_BODY_FEATURE_DIM:
+        to_global = F.pad(to_global, (0, GLOBAL_FEATURE_PADDING))
+    
+    # Set translation components to zero and replace with reconstructed global motion
+    to_global[:, :, GLOBAL_TRANSLATION_START_IDX:GLOBAL_TRANSLATION_END_IDX] = 0.0
+    to_global[:, :, :LOWER_BODY_FEATURE_DIM] = rec_lower2global
+    rec_global = vae_global(to_global)
+
+    # ========================================================================
+    # Calculate Translation from Velocities
+    # ========================================================================
+    
+    # Extract velocity components from global motion
+    rec_trans_v_s = rec_global["rec_pose"][:, :, GLOBAL_TRANSLATION_START_IDX:GLOBAL_TRANSLATION_END_IDX]
+    
+    # Convert velocities to positions by integration
+    rec_x_trans = velocity2position(
+        rec_trans_v_s[:, :, 0:1],
+        1 / MOTION_FPS,
+        torch.zeros(rec_trans_v_s[:, 0, 0:1].shape, device=device)
+    )
+    rec_z_trans = velocity2position(
+        rec_trans_v_s[:, :, 2:3],
+        1 / MOTION_FPS,
+        torch.zeros(rec_trans_v_s[:, 0, 2:3].shape, device=device)
+    )
+    rec_y_trans = rec_trans_v_s[:, :, 1:2]
+    rec_trans = torch.cat([rec_x_trans, rec_y_trans, rec_z_trans], dim=-1)
+    
+    # Initialize shape parameters (betas) for SMPLX model
+    rec_beta = torch.zeros(SMPLX_NUM_BETAS, device=device)
+
+    # Convert axis-angle rotations to 6D rotation representation
+    rec_pose = rec_pose.to(device)
+    rec_trans = rec_trans.to(device)
+    rec_pose_6d = axis_angle_to_6d(
+        rec_pose.reshape(n, SMPLX_NUM_JOINTS, SMPLX_NUM_DIMS_PER_JOINT)
+    ).reshape(n, SMPLX_NUM_JOINTS * 6)
+    rec_exps = rec_exps.to(device)
+    rec_beta = torch.tile(rec_beta, (n, 1))
+    rec_pose_6d = rec_pose_6d.to(device)
+
+    # ========================================================================
+    # SMPLX Mesh Generation
+    # ========================================================================
+    
+    # Generate 3D mesh vertices using SMPLX model
+    with torch.no_grad():
+        vertices_rec = smplx_2020(
+            betas=rec_beta.reshape(n, SMPLX_NUM_BETAS),
+            transl=rec_trans.reshape(n, 3),
+            expression=rec_exps.reshape(n, SMPLX_NUM_EXPRESSIONS),
+            jaw_pose=rec_pose[:, POSE_JAW_INDICES[0]:POSE_JAW_INDICES[1]],
+            global_orient=rec_pose[:, POSE_GLOBAL_ORIENT_INDICES[0]:POSE_GLOBAL_ORIENT_INDICES[1]],
+            body_pose=rec_pose[:, POSE_BODY_START_IDX:POSE_BODY_END_IDX],
+            left_hand_pose=rec_pose[:, POSE_LEFT_HAND_START_IDX:POSE_LEFT_HAND_END_IDX],
+            right_hand_pose=rec_pose[:, POSE_RIGHT_HAND_START_IDX:POSE_RIGHT_HAND_END_IDX],
+            leye_pose=rec_pose[:, POSE_LEFT_EYE_INDICES[0]:POSE_LEFT_EYE_INDICES[1]],
+            reye_pose=rec_pose[:, POSE_RIGHT_EYE_INDICES[0]:POSE_RIGHT_EYE_INDICES[1]],
+        )
+
+    # ========================================================================
+    # Video Rendering
+    # ========================================================================
+    
+    # Render each frame of the motion sequence
+    faces_smplx = torch.tensor(smplx_2020.faces.astype(np.int32), dtype=torch.int64)
+    mesh_renderer = RenderBodyMesh(
+        image_size=RENDER_IMAGE_SIZE,
+        faces=faces_smplx,
+        scale=RENDER_SCALE
+    )
+    pred_images = []
+    verts = vertices_rec.vertices.detach()
+    
+    print("Rendering video frames...")
+    for v in tqdm(verts):
+        rgb = mesh_renderer(v[None])[0]
+        pred_images.append(rgb.cpu()[0] / VIDEO_COLOR_SCALE)
+
+    # Stack frames and prepare audio
+    pred_images_tensor = torch.stack(pred_images)
+    os.makedirs(output_dir, exist_ok=True)
+    dump_path = os.path.join(output_dir, output_filename)
+    
+    # Trim audio to match video duration
+    print(f"Saving video to: {dump_path}")
+    audio_clip = final_speech
+    audio_clip = audio_clip[:int(pred_images_tensor.shape[0] / MOTION_FPS * AUDIO_OUTPUT_SAMPLE_RATE)]
+    
+    # Write video with synchronized audio
+    write_video(
+        pred_images_tensor * VIDEO_COLOR_SCALE,
+        dump_path,
+        MOTION_FPS,
+        audio_clip,
+        AUDIO_OUTPUT_SAMPLE_RATE,
+        "aac"
+    )
+    print("Video saved successfully!")
+
+    return True
+
+
+# ============================================================================
+# Main Entry Point
+# ============================================================================
+
+def main():
+    """Main entry point for the inference script."""
+    parser = argparse.ArgumentParser(
+        description='Audio-to-Motion Body Generation Inference',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument(
+        '--checkpoint',
+        type=str,
+                       default="/scr/juze/experiments/glm4voice_conversational_mot_layernum_40_modalitynum_3_rotation_body_v6/checkpoint-76500",
+        help='Path to the trained model checkpoint directory'
+    )
+    parser.add_argument(
+        '--output_dir',
+        type=str,
+        default="./test_output",
+        help='Output directory for generated videos'
+    )
+    parser.add_argument(
+        '--device',
+        type=str,
+        default="cuda",
+        choices=["cuda", "cpu"],
+        help='Computing device: cuda or cpu'
+    )
+    parser.add_argument(
+        '--user_text',
+        type=str,
+        default="If you had a superpower for one day, what would you choose?",
+        help='User input text prompt for motion generation'
+    )
+    parser.add_argument(
+        '--output_filename',
+        type=str,
+        default="response.mp4",
+        help='Output video filename'
+    )
+    parser.add_argument(
+        '--max_new_tokens',
+        type=int,
+        default=1024,
+        help='Maximum number of tokens to generate'
+    )
+    parser.add_argument(
+        '--temperature',
+        type=float,
+        default=0.0,
+        help='Sampling temperature (0.0 = deterministic, higher = more diverse)'
+    )
+    parser.add_argument(
+        '--top_p',
+        type=float,
+        default=0.1,
+        help='Top-p (nucleus) sampling parameter (0.0-1.0)'
+    )
+    args = parser.parse_args()
+    
+    # Validate checkpoint path
+    if not os.path.exists(args.checkpoint):
+        print(f"Error: Checkpoint path does not exist: {args.checkpoint}")
+        return
+    
+    # Create output directory
+    os.makedirs(args.output_dir, exist_ok=True)
+    
+    # Set device
+    if args.device == "cuda" and not torch.cuda.is_available():
+        print("Warning: CUDA requested but not available. Using CPU instead.")
+        device = "cpu"
+    else:
+        device = "cuda:0" if args.device == "cuda" else "cpu"
+    print(f"Using device: {device}")
+    
+    # Load tokenizer
+    print("\n=== Step 1: Load Tokenizer ===")
+    tokenizer_path = os.path.join(ROOT_DIR, "vibes")
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
+
+    # Load model configuration and create model instance
+    print("\n=== Step 2: Load Base Model ===")
+    config = AutoConfig.from_pretrained(tokenizer_path, trust_remote_code=True)
+    
+    base_model = AutoModel.from_config(
+        config,
+        trust_remote_code=True,
+        torch_dtype=torch.bfloat16 if device.startswith("cuda") else torch.float32,
+        attn_implementation="flash_attention_2",
+    ).to(device)
+
+    # Load model weights from checkpoint
+    print(f"\n=== Step 3: Load Model Weights from {args.checkpoint} ===")
+    load_sharded_checkpoint(base_model, args.checkpoint)
+
+    model = base_model
+    model.eval()
+    
+    # Generate motion from text
+    generate_motion_from_text(
+        model,
+        tokenizer,
+        device,
+        user_text=args.user_text,
+        output_dir=args.output_dir,
+        output_filename=args.output_filename,
+        max_new_tokens=args.max_new_tokens,
+        temperature=args.temperature,
+        top_p=args.top_p
+    )
+    
+    print("\n=== Inference Completed Successfully ===")
+
+
+if __name__ == "__main__":
+    main() 

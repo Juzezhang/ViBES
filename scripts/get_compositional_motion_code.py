@@ -7,7 +7,11 @@ from multimodal_tokenizers.config import parse_args
 from multimodal_tokenizers.data.build_data import build_data
 from multimodal_tokenizers.models.build_model import build_model
 from loguru import logger
-from multimodal_tokenizers.utils.load_checkpoint import load_pretrained_vae_upper, load_pretrained_vae_compositional
+from multimodal_tokenizers.utils.load_checkpoint import (
+    load_pretrained_vae_upper,
+    load_pretrained_vae_compositional,
+    load_pretrained_vae_body,
+)
 from multimodal_tokenizers.utils.renderer_utils import RenderMesh
 from multimodal_tokenizers.utils.utils_videos import write_video
 from smplx import FLAME
@@ -58,6 +62,8 @@ def main():
         "tfhp": "TFHP",
         "YouTube_Talking": "YouTube_Talking",
         "YouTube_Talking_Synthetic": "YouTube_Talking_Synthetic",
+        "amass_genmo": "AMASS_Genmo",
+        "beat2_genmo": "BEAT2_Genmo",
     }
     allowed_dataset_names = set()
     for config in cfg.DATASET.datasets:
@@ -78,9 +84,15 @@ def main():
             allowed_dataset_names.add("YouTube_Talking")
         elif config_name == "YouTube_Talking_Synthetic":
             allowed_dataset_names.add("YouTube_Talking_Synthetic")
+        elif config_name == "BEAT2_Genmo":
+            allowed_dataset_names.add("beat2_genmo")
+        elif config_name == "AMASS_Genmo":
+            allowed_dataset_names.add("amass_genmo")
     output_roots = {}
     dataset_modalities_map = {}
-    code_path = cfg.DATASET.code_path
+    code_path = getattr(cfg.DATASET, "code_path", None)
+    if not code_path:
+        raise ValueError("DATASET.code_path must be set for tokenization outputs.")
     saved_counts = {}
     modalities_cfg = getattr(cfg.DATASET, "MODALITIES", None)
     default_modalities = {"face", "upper", "lower", "hand"}
@@ -126,18 +138,27 @@ def main():
 
     # load_pretrained_vae_face(cfg, model, logger, phase="token")
     # load_pretrained_vae_upper(cfg, model, logger, phase="token")
-    load_pretrained_vae_compositional(cfg, model, logger, phase="token")
+    if cfg.DATASET.motion_representation == "genmo":
+        load_pretrained_vae_body(cfg, model, logger, phase="token")
+    else:
+        load_pretrained_vae_compositional(cfg, model, logger, phase="token")
 
     if cfg.ACCELERATOR == "gpu":
-        model.vae_face.to(device)
-        model.vae_upper.to(device)
-        model.vae_lower.to(device)
-        model.vae_hand.to(device)
+        if cfg.DATASET.motion_representation == "genmo":
+            model.vae_body.to(device)
+        else:
+            model.vae_face.to(device)
+            model.vae_upper.to(device)
+            model.vae_lower.to(device)
+            model.vae_hand.to(device)
 
-    model.vae_face.eval()
-    model.vae_upper.eval()
-    model.vae_lower.eval()
-    model.vae_hand.eval()
+    if cfg.DATASET.motion_representation == "genmo":
+        model.vae_body.eval()
+    else:
+        model.vae_face.eval()
+        model.vae_upper.eval()
+        model.vae_lower.eval()
+        model.vae_hand.eval()
     logger.info("model loaded")
 
     for batch in tqdm(datasets.token_dataloader(), desc=f'compositional motion tokenize'):
@@ -155,16 +176,30 @@ def main():
             logger.warning(f"Skipping {seq_name}: missing DATASET.{dataset_key} config.")
             continue
 
+        output_root = output_roots.get(dataset_name)
+        if output_root is None:
+            output_root = os.path.join(dataset_cfg.ROOT, code_path)
+            if cfg.DATASET.motion_representation == "genmo":
+                ensure_output_dirs(output_root, {"body"})
+            else:
+                dataset_modalities = get_modalities(dataset_name)
+                dataset_modalities_map[dataset_name] = dataset_modalities
+                ensure_output_dirs(output_root, dataset_modalities)
+            output_roots[dataset_name] = output_root
+
+        if cfg.DATASET.motion_representation == "genmo":
+            motion_vector = batch["motion_vector"].to(device)
+            tar_index_value_body = model.vae_body.map2index(motion_vector)
+            target_path_body = os.path.join(output_root, 'body', seq_name + '.npy')
+            Path(target_path_body).parent.mkdir(parents=True, exist_ok=True)
+            np.save(target_path_body, tar_index_value_body.to('cpu').numpy())
+            saved_counts[dataset_name] = saved_counts.get(dataset_name, 0) + 1
+            continue
+
         dataset_modalities = dataset_modalities_map.get(dataset_name)
         if dataset_modalities is None:
             dataset_modalities = get_modalities(dataset_name)
             dataset_modalities_map[dataset_name] = dataset_modalities
-
-        output_root = output_roots.get(dataset_name)
-        if output_root is None:
-            output_root = os.path.join(dataset_cfg.ROOT, code_path)
-            ensure_output_dirs(output_root, dataset_modalities)
-            output_roots[dataset_name] = output_root
 
         saved_any = False
         vis_face_tokens = None

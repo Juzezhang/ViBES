@@ -1879,6 +1879,7 @@ BEAT_SMPLX_FACE_HEAD = 'beat_smplx_face_head'
 BEAT_SMPLX_UPPER = 'beat_smplx_upper'
 BEAT_SMPLX_HANDS = 'beat_smplx_hands'
 BEAT_SMPLX_LOWER = 'beat_smplx_lower'
+BEAT_SMPLX_UPPER_LOWER = 'beat_smplx_upper_lower'
 BEAT_SMPLX_JOINTS_6D = 'beat_smplx_joints_6D'
 
 
@@ -1897,4 +1898,5 @@ JOINT_MASK_FACE_6D   = _create_joint_mask_6D(ORI_JOINTS_6D, BEAT_SMPLX_FACE)
 JOINT_MASK_HANDS_6D = _create_joint_mask_6D(ORI_JOINTS_6D, BEAT_SMPLX_HANDS)
 JOINT_MASK_LOWER_6D = _create_joint_mask_6D(ORI_JOINTS_6D, BEAT_SMPLX_LOWER)
 JOINT_MASK_UPPER_6D = _create_joint_mask_6D(ORI_JOINTS_6D, BEAT_SMPLX_UPPER)
+JOINT_MASK_UPPER_LOWER_6D = _create_joint_mask_6D(ORI_JOINTS_6D, BEAT_SMPLX_UPPER_LOWER)
 # For other ori_joints types, you can add more pre-computed masks if needed

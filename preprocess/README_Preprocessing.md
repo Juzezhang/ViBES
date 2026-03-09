@@ -171,18 +171,218 @@ python preprocess/beat2_motion_fps_converter.py \
     --output_dir /simurgh2/datasets/BEAT2/beat_english_v2.0.0/smplxflame_25_mirror
 ```
 
-
 #### 2.3 TFHP Dataset Preprocess
 
 Don't need to much modification for the dataset structure
 
 #### 2.4 Youtube Dataset Preprocess
 
-Here's the original face portation, please download from here:
+Here's the original face portation, please download from [here](https://drive.google.com/drive/folders/1bawax9GBDdsjdoALG99gIfj6w_z0g_lA?usp=sharing):
 
 
+---
 
+## 🔄 Motion Vector Preprocessing & Normalization
 
+This section covers converting raw SMPL-X data to motion vector formats and computing normalization statistics (HumanML3D-style grouped normalization).
+
+### Supported Motion Vector Formats
+
+| Format | Dimensions | Description |
+|--------|-----------|-------------|
+| **Parts (stored keys)** | upper=78D, lower=71D, face=106D, face_with_head=112D, hand=180D | Produced by `dataset_process_*_parts.py` |
+| **Lower** | 71D | lower_pose_6d (54) + local_transl_vel (3) + foot_contact (4) + betas (10) |
+| **Upper+Lower** | 149D | upper_pose_6d (78) + lower (71) |
+| **GENMO** | 145D | body_pose_r6d (126) + betas (10) + global_orient_r6d (6) + local_transl_vel (3) |
+
+### 3.1 Parts Format (upper/lower/face/hand)
+
+Convert BEAT2 and AMASS to part-wise motion arrays. Each output `.npz` includes `upper`, `lower`, `face`, `face_with_head`, and `hand`.  
+Lower-only and upper+lower training should read from these keys (no separate lower-only preprocessing).  
+`trans`, `betas`, and `foot_contact` are embedded in the `lower` vector (not saved as standalone keys).
+
+```bash
+# BEAT2 → Parts (upper/lower/face/hand)
+python preprocess/dataset_process_beat2_parts.py \
+    --input_dir /simurgh2/datasets/BEAT2/beat_english_v2.0.0 \
+    --output_dir /simurgh2/datasets/BEAT2/beat_english_v2.0.0/beat2_parts_25 \
+    --smplx_path ./model_files/smplx_models \
+    --subdirs smplxflame_25 smplxflame_25_mirror
+
+# AMASS → Parts (upper/lower/face/hand)
+python preprocess/dataset_process_amass_parts.py \
+    --dataset_path_original /simurgh2/datasets/AMASS_original_smplx \
+    --dataset_path_processed /simurgh2/datasets/AMASS \
+    --smplx_path ./model_files/smplx_models \
+    --index_path ./preprocess/index.csv \
+    --ex_fps 25
+```
+
+### 3.2 GENMO Format (145D)
+
+Convert BEAT2 and AMASS to GENMO motion vectors:
+
+```bash
+# BEAT2 → GENMO (NOTE: paths are hardcoded in the script, modify if needed)
+# Default input:  /simurgh2/datasets/BEAT2/beat_english_v2.0.0/smplxflame_25
+# Default output: /simurgh2/datasets/BEAT2/beat_english_v2.0.0/beat2_genmo_25
+python preprocess/dataset_process_beat2_genmo.py
+
+# AMASS → GENMO
+python preprocess/dataset_process_amass_genmo.py \
+    --dataset_path_original /simurgh2/datasets/AMASS_original_smplx \
+    --dataset_path_processed /simurgh2/datasets/AMASS \
+    --index_path ./preprocess/index.csv \
+    --ex_fps 25
+```
+
+### 3.3 Compute Normalization Statistics
+
+After preprocessing, compute Mean/Std for each format using HumanML3D-style grouped normalization.
+
+> **Note**: The script recursively finds all `.npz` files in the given directories, so you can pass the root directory and it will traverse subdirectories automatically.
+
+```bash
+# Lower format normalization (reads `lower` key from parts outputs)
+python preprocess/compute_normalization_stats.py \
+    --format lower \
+    --data_dirs /simurgh2/datasets/BEAT2/beat_english_v2.0.0/beat2_parts_25 \
+                /simurgh2/datasets/AMASS/amass_parts_25 \
+    --output_dir /simurgh2/datasets/normalization_stats/lower_25 \
+    --verify
+
+# Upper+Lower format normalization
+python preprocess/compute_normalization_stats.py \
+    --format upper_lower \
+    --data_dirs /simurgh2/datasets/BEAT2/beat_english_v2.0.0/beat2_parts_25 \
+                /simurgh2/datasets/AMASS/amass_parts_25 \
+    --output_dir /simurgh2/datasets/normalization_stats/parts_25 \
+    --verify
+
+# GENMO format normalization
+python preprocess/compute_normalization_stats.py \
+    --format genmo \
+    --data_dirs /simurgh2/datasets/BEAT2/beat_english_v2.0.0/beat2_genmo_25 \
+                /simurgh2/datasets/AMASS/amass_genmo_25 \
+    --output_dir /simurgh2/datasets/normalization_stats/genmo_25 \
+    --verify
+```
+
+### Normalization Strategy
+
+We use **HumanML3D-style grouped normalization**:
+- Compute per-dimension mean and std across all data
+- For each semantic group, replace per-dim std with the group's average std
+- Special handling:
+  - **foot_contact**: Not normalized (already 0-1 range)
+  - **betas**: Not normalized (fixed per sequence)
+
+| Feature Group | Lower | Upper+Lower | Normalized |
+|--------------|-------|-------------|------------|
+| upper_pose_6d | - | [0:78] | ✓ Group std |
+| lower_pose_6d | [0:54] | [78:132] | ✓ Group std |
+| local_transl_vel | [54:57] | [132:135] | ✓ Group std |
+| foot_contact | [57:61] | [135:139] | ✗ |
+| betas | [61:71] | [139:149] | ✗ |
+
+### Output Structure
+
+After preprocessing, your datasets will have the following structure:
+
+```
+datasets/
+├── BEAT2/beat_english_v2.0.0/
+│   ├── smplxflame_25/                    # Original SMPL-X data
+│   │   ├── 1/
+│   │   │   └── *.npz
+│   │   └── .../
+│   ├── smplxflame_25_mirror/             # Mirrored SMPL-X data
+│   │   └── .../
+│   ├── beat2_parts_25/             # Parts outputs (upper/lower/face/hand)
+│   │   ├── smplxflame_25/
+│   │   └── smplxflame_25_mirror/
+│   └── beat2_genmo_25/                   # GENMO format (145D)
+│       ├── smplxflame_25/
+│       └── smplxflame_25_mirror/
+├── AMASS/
+│   ├── amass_data_align_25/              # Original SMPL-X data
+│   ├── amass_parts_25/             # Parts outputs (upper/lower/face/hand)
+│   │   └── *.npz
+│   └── amass_genmo_25/                   # GENMO format (145D)
+│       └── *.npz
+└── normalization_stats/
+    ├── lower_25/
+    │   ├── Mean.npy                      # (71,) float32
+    │   ├── Std.npy                       # (71,) float32
+    │   └── stats_info.json               # Metadata and group statistics
+    ├── parts_25/
+    │   ├── Mean.npy                      # (149,)
+    │   ├── Std.npy                       # (149,)
+    │   └── stats_info.json
+    └── genmo_25/
+        ├── Mean.npy                      # (145,)
+        ├── Std.npy                       # (145,)
+        └── stats_info.json
+```
+
+---
+
+## 🚀 Training with Preprocessed Data
+
+After preprocessing and computing normalization statistics, you can train VQ-VAE models using the preprocessed data. This is faster because it doesn't require the SMPLX model during training.
+
+### 4.1 Using Preprocessed Configs
+
+Example configs are provided for training with preprocessed data:
+
+```bash
+# Train with preprocessed Lower body format (71D)
+python -m multimodal_tokenizers.train --cfg configs/config_mixed_stage1_lower_preprocessed.yaml
+
+# Train with preprocessed Upper+Lower format (149D)
+python -m multimodal_tokenizers.train --cfg configs/config_mixed_stage1_upper_lower_preprocessed.yaml
+```
+
+### 4.2 Config Structure for Preprocessed Data
+
+Key config settings for preprocessed data:
+
+```yaml
+# Set Selected_part to use preprocessed format
+Selected_part: lower_preprocessed  # or upper_lower_preprocessed, genmo_preprocessed
+
+# Specify normalization directory
+DATASET:
+  normalization_dir: /simurgh2/datasets/normalization_stats/lower_25
+  normalize: true
+
+  # Use preprocessed dataset names
+  datasets:
+    - name: "BEAT2_preprocessed"
+      preprocessed_dir: beat2_lower_25  # Relative to BEAT2.ROOT
+      subdirs:
+        - smplxflame_25
+        - smplxflame_25_mirror
+    - name: "AMASS_preprocessed"
+      preprocessed_dir: amass_lower_25  # Relative to AMASS.ROOT
+```
+
+### 4.3 Available Preprocessed Formats
+
+| Selected_part | Dimension | Description |
+|--------------|-----------|-------------|
+| `lower_preprocessed` | 71D | Lower body only |
+| `upper_lower_preprocessed` | 149D | Upper + Lower body |
+| `genmo_preprocessed` | 145D | Full body GENMO style |
+
+### 4.4 Benefits of Preprocessed Data
+
+1. **Faster training**: No SMPLX forward pass during data loading
+2. **Smaller memory footprint**: No SMPLX model loaded on GPU
+3. **Consistent preprocessing**: All data processed with same settings
+4. **Pre-computed foot contacts**: No runtime contact computation
+
+---
 
 ## 🆘 Troubleshooting
 
@@ -190,4 +390,5 @@ Here's the original face portation, please download from here:
 - **SMPL-X Registration**: Must register at https://smpl-x.is.tue.mpg.de/
 - **Memory Errors**: Reduce batch size or use `--num_workers 1`
 - **Path Issues**: Use absolute paths for dataset locations
-
+- **Dimension Mismatch**: Ensure normalization stats match motion format
+- **Missing Files**: Run preprocessing scripts before training with preprocessed data

@@ -1,5 +1,5 @@
 CONFIG_FOLDER: configs # Config files path
-FOLDER: ./experiments # Experiment files saving path
+FOLDER: /simurgh2/users/juze/experiments # Experiment files saving path
 
 TEST:
   FOLDER: results # Testing files saving path
@@ -19,7 +19,7 @@ DATASET:
   BEAT2:
     ROOT: /simurgh2/datasets/BEAT2/beat_english_v2.0.0 # BEAT2 directory 
   AMASS:
-    ROOT: /simurgh2/datasets/HumanML3D_25 # AMASS directory 
+    ROOT: /simurgh2/datasets/AMASS # AMASS directory 
   AMASS_talking:
     ROOT: /simurgh2/datasets/AMASS_talking # AMASS_talking directory 
   AMASS_P2P:
@@ -34,6 +34,13 @@ DATASET:
     ROOT: "/simurgh/group/juze/datasets/YouTube_Talking" # YouTube_Talking directory  
   YouTube_Talking_Synthetic:
     ROOT: "/simurgh/group/juze/datasets/YouTube_Talking_Synthetic" # YouTube_Talking_Synthetic directory  
+  AMASS_Genmo:
+    ROOT: "/simurgh2/datasets/AMASS" # AMASS_Genmo directory  
+  BEAT2_Genmo:
+    ROOT: "/simurgh2/datasets/BEAT2/beat_english_v2.0.0" # BEAT2_Genmo directory  
+
+
+
 
 METRIC:
   TM2T:

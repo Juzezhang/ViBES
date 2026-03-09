@@ -47,8 +47,6 @@ class VAELosses(BaseLosses):
             params['recons-face_loss'] = 1.0
             losses.append("recons-hand_loss")
             params['recons-hand_loss'] = 1.0
-            losses.append("recons-global_loss")
-            params['recons-global_loss'] = 1.0
             # Commitment losses for different body parts
             losses.append("commit-upper_loss")
             params['commit-upper_loss'] = 1.0
@@ -60,17 +58,50 @@ class VAELosses(BaseLosses):
             params['commit-face_loss'] = 1.0
             losses.append("commit-hand_loss")
             params['commit-hand_loss'] = 1.0
+            # Log VQ perplexity when provided
+            losses.append("perplexity")
+            params["perplexity"] = 0.0
+            # Log FK joint metrics only for parts that emit them
+            if cfg.Selected_part in ["lower", "lower_54", "lower_global", "upper_lower_global", "compositional"]:
+                losses.append("betas_metric")
+                params["betas_metric"] = 0.0
+                losses.append("joint_pos_metric")
+                params["joint_pos_metric"] = 0.0
+                losses.append("joint_vel_metric")
+                params["joint_vel_metric"] = 0.0
+                losses.append("joint_acc_metric")
+                params["joint_acc_metric"] = 0.0
+            if cfg.Selected_part in ["lower_global", "upper_lower_global"]:
+                losses.append("trans_vel_metric")
+                params["trans_vel_metric"] = 0.0
+                losses.append("trans_pos_metric")
+                params["trans_pos_metric"] = 0.0
         else:
             # For unified representation: one loss for the entire body
             losses.append("recons_loss") 
             params['recons_loss'] = 1.0 
             losses.append("commit_loss")
             params['commit_loss'] = 1.0
+            if cfg.DATASET.motion_representation == 'genmo':
+                # Log FK joint metrics without affecting total (precomputed in model)
+                losses.append("joint_pos_metric")
+                params["joint_pos_metric"] = 0.0
+                losses.append("joint_vel_metric")
+                params["joint_vel_metric"] = 0.0
+                losses.append("joint_acc_metric")
+                params["joint_acc_metric"] = 0.0
+                # Log VQ perplexity (for codebook utilization monitoring)
+                losses.append("perplexity")
+                params["perplexity"] = 0.0
 
         # Map loss types to their corresponding loss functions
         losses_func = {}
         for loss in losses:
-            if loss.split('_')[0] == 'recons':
+            if loss == "perplexity":
+                losses_func[loss] = CommitLoss  # Just pass through the value
+            elif loss.startswith("joint_") or loss in ["betas_metric", "trans_vel_metric", "trans_pos_metric"]:
+                losses_func[loss] = nn.MSELoss
+            elif loss.startswith('recons'):
                 # Select reconstruction loss type based on configuration
                 if recons_loss == "l1":
                     losses_func[loss] = nn.L1Loss
@@ -78,9 +109,7 @@ class VAELosses(BaseLosses):
                     losses_func[loss] = nn.MSELoss
                 elif recons_loss == "l1_smooth":
                     losses_func[loss] = nn.SmoothL1Loss
-            elif loss.split('_')[1] in [
-                'commit', 'loss'
-            ]:
+            elif loss.startswith('commit') or ('_' in loss and loss.split('_')[1] in ['commit', 'loss']):
                 # Use the CommitLoss wrapper for these types
                 losses_func[loss] = CommitLoss
             else:
@@ -103,7 +132,7 @@ class VAELosses(BaseLosses):
         total: float = 0.0
         # For vector quantization stages: sum all losses with "loss" in their name
         for key, value in rs_set.items():
-            if "loss" in key:
+            if key in self.losses:
                 # Use _update_loss method to update each loss value
                 total += self._update_loss(key, None, None, precomputed_val=value)
             

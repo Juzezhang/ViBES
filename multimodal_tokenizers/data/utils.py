@@ -65,6 +65,8 @@ def _infer_collate_key(sample):
         return "vq_face_pairs"
     if "face_p1" in sample:
         return "vq_face_single"
+    if "motion_vector" in sample:
+        return "vq_genmo"
     has_upper = "upper" in sample
     has_lower = "lower" in sample or "lower_54" in sample
     has_hand = "hand" in sample
@@ -144,6 +146,15 @@ def conversation_collate(batch):
             required=["face"],
         )
 
+    if schema == "vq_genmo":
+        return _collate_by_spec(
+            notnone_batches,
+            schema,
+            tensor_keys=["motion_vector", "trans", "global_orient", "betas"],
+            list_keys=["motion_len", "id_name", "dataset_name"],
+            required=["motion_vector"],
+        )
+
     if schema == "vq_upper":
         return _collate_by_spec(
             notnone_batches,
@@ -161,6 +172,15 @@ def conversation_collate(batch):
             tensor_keys=[lower_key, "shape", "trans"],
             list_keys=["motion_len", "id_name", "dataset_name"],
             required=[lower_key],
+        )
+
+    if schema == "vq_upper_lower":
+        return _collate_by_spec(
+            notnone_batches,
+            schema,
+            tensor_keys=["upper", "lower", "shape", "trans"],
+            list_keys=["motion_len", "id_name", "dataset_name"],
+            required=["upper", "lower", "shape"],
         )
 
     if schema == "vae_global":

@@ -49,6 +49,7 @@ DATASET:
   pose_length: 64
   stride: 20
   unit_length: 1
+  SMPLX_NUM_BETAS: 300
   # pre_frames: 4
   # audio_fps: 16000
   # audio_down: 640
@@ -65,7 +66,7 @@ DATASET:
     - name: "YouTube_Talking"
     - name: "YouTube_Talking_Synthetic"
   datasets_test:
-    - name: "BEAT2"
+    - name: "TFHP"
 
 METRIC:
   TYPE: ['RotationMetrics']

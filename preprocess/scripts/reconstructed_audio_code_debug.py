@@ -28,6 +28,39 @@ output_dir = args.output_dir
 
 _resample_buffer: dict[int, torchaudio.transforms.Resample] = {}
 
+
+def save_wav_with_torchaudio(path: str, waveform: torch.Tensor, sample_rate: int) -> None:
+    """
+    Save WAV using torchaudio backend explicitly (avoid torchcodec save path).
+    """
+    wav = waveform.detach().cpu()
+    if wav.ndim == 1:
+        wav = wav.unsqueeze(0)
+
+    save_kwargs = {
+        "format": "wav",
+        "encoding": "PCM_S",
+        "bits_per_sample": 16,
+    }
+    last_error = None
+
+    for backend in ("soundfile", "sox_io", None):
+        try:
+            if backend is None:
+                torchaudio.save(path, wav, sample_rate, **save_kwargs)
+            else:
+                torchaudio.save(path, wav, sample_rate, backend=backend, **save_kwargs)
+            return
+        except TypeError:
+            # Older torchaudio may not support `backend` kwarg.
+            if backend is None:
+                raise
+        except Exception as exc:
+            last_error = exc
+            continue
+
+    raise RuntimeError(f"Failed to save audio with torchaudio: {last_error}")
+
 # Speech tokenizer
 whisper_model = WhisperVQEncoder.from_pretrained('THUDM/glm-4-voice-tokenizer').eval().to(device)
 feature_extractor = WhisperFeatureExtractor.from_pretrained('THUDM/glm-4-voice-tokenizer')
@@ -149,9 +182,13 @@ for subfolder in tqdm(os.listdir(wav_folder)):
                 # Merge and save audio after processing all chunks
                 # if tts_speechs:
                 final_speech = torch.cat(tts_speechs, dim=-1).cpu()
-                torchaudio.save('./demo/debug/output.wav', final_speech.unsqueeze(0), 22050)
+                save_wav_with_torchaudio('./demo/debug/output.wav', final_speech, 22050)
                 wav_input, sample_rate = torchaudio.load(wav_path)
-                torchaudio.save('./demo/debug/input.wav', wav_input[:, int(sample_rate * start_sec) : int(sample_rate * end_sec)], sample_rate)
+                save_wav_with_torchaudio(
+                    './demo/debug/input.wav',
+                    wav_input[:, int(sample_rate * start_sec): int(sample_rate * end_sec)],
+                    sample_rate,
+                )
 
             except Exception as e:
                 print(f"Error processing {wav_file}: {e}")
