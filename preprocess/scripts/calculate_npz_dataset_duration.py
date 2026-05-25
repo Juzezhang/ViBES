@@ -72,7 +72,7 @@ def calculate_npz_dataset_duration(data_root, fps=25):
 
 
 if __name__ == "__main__":
-    data_root = "/simurgh/group/juze/datasets/YouTube_Talking/FLAME_coeffs_25"
+    data_root = "/path/to/YouTube_Talking/FLAME_coeffs_25"
     calculate_npz_dataset_duration(data_root, fps=25)
 
 

@@ -21,7 +21,7 @@ TRAIN:
   BATCH_SIZE: 128 # Size of batches - reduced from 64
   END_EPOCH: 999999 # End epoch
   RESUME: '' # Resume training from this path
-  # PRETRAINED: '/simurgh/u/juze/code/conversational_agent/experiments/conversational_agent/VQVAE_Mixed_Face_Only_512_DS1_Dim_512_wo_meshloss/checkpoints/epoch=79.ckpt' # Preatrained model path
+  # PRETRAINED: '/path/to/conversational_agent/experiments/conversational_agent/VQVAE_Mixed_Face_Only_512_DS1_Dim_512_wo_meshloss/checkpoints/epoch=79.ckpt' # Preatrained model path
   PRETRAINED_VQ: '' # Preatrained model path
   PRECISION: 32
   FORCE_BF16: false

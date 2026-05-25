@@ -14,8 +14,8 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 # Argument parsing
 parser = argparse.ArgumentParser('exp_motion command line tools')
-parser.add_argument('--wav_folder', type=str, default="/simurgh/group/juze/datasets/YouTube_Talking/audios_original", help="Path to the folder containing .wav files")
-parser.add_argument('--output_dir', type=str, default="/simurgh/group/juze/datasets/YouTube_Talking/audios_token_glm",
+parser.add_argument('--wav_folder', type=str, default="/path/to/YouTube_Talking/audios_original", help="Path to the folder containing .wav files")
+parser.add_argument('--output_dir', type=str, default="/path/to/YouTube_Talking/audios_token_glm",
                     help="Directory to save the quantized outputs")
 args = parser.parse_args()
 

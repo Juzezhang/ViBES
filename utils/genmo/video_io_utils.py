@@ -1,5 +1,5 @@
 """GENMO video IO utilities (vendored)."""
-# Adapted from: /simurgh/u/askhan1/winter26/Video-as-Action-Prompt/genmo/utils/video_io_utils.py
+# Adapted from askhan1 GENMO utilities
 # Local copy for ViBES (light edits only).
 
 import os

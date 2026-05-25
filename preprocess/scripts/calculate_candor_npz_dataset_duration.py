@@ -72,7 +72,7 @@ def calculate_npz_dataset_duration(data_root, fps=25):
 
 
 if __name__ == "__main__":
-    data_root = "/simurgh/u/juze/datasets/CANDOR/FLAME_coeffs"
+    data_root = "/path/to/CANDOR/FLAME_coeffs"
     # Resolve symlink to actual path
     actual_path = os.path.realpath(data_root)
     print(f"Data root (resolved): {actual_path}")

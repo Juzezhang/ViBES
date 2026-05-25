@@ -7,8 +7,8 @@ Purpose:
 - Save plain-text transcripts to an output directory, mirroring the folder structure
 
 Defaults:
-- Input audios:     /simurgh/group/juze/datasets/YouTube_Talking_Synthetic/audios
-- Output transcripts:/simurgh/group/juze/datasets/YouTube_Talking_Synthetic/transcripts
+- Input audios:     /path/to/YouTube_Talking_Synthetic/audios
+- Output transcripts:/path/to/YouTube_Talking_Synthetic/transcripts
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ from faster_whisper import WhisperModel
 
 
 SUPPORTED_AUDIO_EXTS = {".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg"}
-DEFAULT_INPUT_DIR = "/simurgh/group/juze/datasets/YouTube_Talking_Synthetic/audios"
-DEFAULT_OUTPUT_DIR = "/simurgh/group/juze/datasets/YouTube_Talking_Synthetic/transcripts"
+DEFAULT_INPUT_DIR = "/path/to/YouTube_Talking_Synthetic/audios"
+DEFAULT_OUTPUT_DIR = "/path/to/YouTube_Talking_Synthetic/transcripts"
 
 
 def find_audio_files(root: Path) -> list[Path]:

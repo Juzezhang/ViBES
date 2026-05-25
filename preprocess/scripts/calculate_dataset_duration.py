@@ -54,6 +54,6 @@ def calculate_dataset_duration(data_root):
 
 
 if __name__ == "__main__":
-    data_root = "/simurgh/u/askhan1/embody_3d/datasets/aiagent"
+    data_root = "/path/to/embody_3d/datasets/aiagent"
     calculate_dataset_duration(data_root)
 

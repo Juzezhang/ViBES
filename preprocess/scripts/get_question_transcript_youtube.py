@@ -1177,10 +1177,10 @@ def merge_short_gaps(speaking_segments, max_gap_duration=2.0):
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Process video dataset to extract speaking segments and transcripts")
-    parser.add_argument("--video_dir", type=str, default="/simurgh/group/juze/datasets/YouTube_Talking/video_20241226", help="Dataset directory containing videos to process")
-    parser.add_argument("--output_dir_audio", type=str, default="/simurgh/group/juze/datasets/YouTube_Talking/audios", help="Output directory for extracted audio segments")
-    parser.add_argument("--output_dir_transcript", type=str, default="/simurgh/group/juze/datasets/YouTube_Talking/transcript", help="Output directory for transcripts")
-    parser.add_argument("--talknet_output_dir", type=str, default="/simurgh/group/juze/datasets/YouTube_Talking/talknet_output", help="Directory containing TalkNet results")
+    parser.add_argument("--video_dir", type=str, default="/path/to/YouTube_Talking/video_20241226", help="Dataset directory containing videos to process")
+    parser.add_argument("--output_dir_audio", type=str, default="/path/to/YouTube_Talking/audios", help="Output directory for extracted audio segments")
+    parser.add_argument("--output_dir_transcript", type=str, default="/path/to/YouTube_Talking/transcript", help="Output directory for transcripts")
+    parser.add_argument("--talknet_output_dir", type=str, default="/path/to/YouTube_Talking/talknet_output", help="Directory containing TalkNet results")
     parser.add_argument("--device", type=str, default="cuda", help="Device for Whisper model (cuda/cpu)")
     parser.add_argument("--ignore_talknet", action="store_true", help="Skip TalkNet processing, directly transcribe entire video")
     parser.add_argument("--only_talknet", action="store_true", help="Only verify TalkNet results, skip transcription")

@@ -1,5 +1,5 @@
 """Thin wrappers around multimodal_tokenizers rotation conversions."""
-# Derived from: /simurgh/u/askhan1/winter26/Video-as-Action-Prompt/genmo/utils/rotation_conversions.py
+# Adapted from askhan1 GENMO utilities
 # Here we forward to local rotation conversion utilities.
 from multimodal_tokenizers.utils.rotation_conversions import (  # noqa: F401
     axis_angle_to_matrix,

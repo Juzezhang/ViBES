@@ -4,9 +4,9 @@ import json
 
 
 candor_structure = {}
-seq_list = os.listdir(pjoin('/simurgh/u/juze/datasets/CANDOR/', 'FLAME_coeffs'))
+seq_list = os.listdir(pjoin('/path/to/CANDOR/', 'FLAME_coeffs'))
 for seq in seq_list:
-    video_list = os.listdir(pjoin('/simurgh/u/juze/datasets/CANDOR/', 'FLAME_coeffs', seq))
+    video_list = os.listdir(pjoin('/path/to/CANDOR/', 'FLAME_coeffs', seq))
     candor_structure[seq] = []
     for video in video_list:
         if video.endswith('.npz'):
@@ -16,7 +16,7 @@ for seq in seq_list:
             print(video)
 
 
-with open(pjoin('/simurgh/u/juze/datasets/CANDOR/', 'candor_structure.json'), 'w') as f:
+with open(pjoin('/path/to/CANDOR/', 'candor_structure.json'), 'w') as f:
     json.dump(candor_structure, f)
 
 pass

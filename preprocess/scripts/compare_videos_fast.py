@@ -292,13 +292,13 @@ def main():
     args = parser.parse_args()
     
     # Paths
-    lom_dir = "/simurgh/group/juze/result/lom"
-    ours_layer5_dir = "/simurgh/u/juze/code/conversational_agent/demo/t2m_qualityresult_layer5"
-    ours_layer40_dir = "/simurgh/u/juze/code/conversational_agent/demo/t2m_qualityresult_layer40"
-    motiongpt_dir = "/simurgh/u/juze/code/MotionGPT/output"
-    momask_dir = "/simurgh/u/juze/code/momask-codes/generation/momask/animations"
-    texts_dir = "/simurgh/u/juze/datasets/HumanML3D/texts"
-    output_dir = "/simurgh/u/juze/code/conversational_agent/demo/comparison_videos_fast"
+    lom_dir = "/path/to/result/lom"
+    ours_layer5_dir = "/path/to/conversational_agent/demo/t2m_qualityresult_layer5"
+    ours_layer40_dir = "/path/to/conversational_agent/demo/t2m_qualityresult_layer40"
+    motiongpt_dir = "/path/to/MotionGPT/output"
+    momask_dir = "/path/to/momask-codes/generation/momask/animations"
+    texts_dir = "/path/to/HumanML3D/texts"
+    output_dir = "/path/to/conversational_agent/demo/comparison_videos_fast"
     
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)

@@ -17,8 +17,8 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 # Argument parsing
 parser = argparse.ArgumentParser('exp_motion command line tools')
-parser.add_argument('--wav_folder', type=str, default="/simurgh/group/yuheng/CANDOR_processed/", help="Path to the folder containing .wav files")
-parser.add_argument('--output_dir', type=str, default="/simurgh/u/juze/datasets/CANDOR/audios_token_glm_reconstructed",
+parser.add_argument('--wav_folder', type=str, default="/path/to/CANDOR_processed/", help="Path to the folder containing .wav files")
+parser.add_argument('--output_dir', type=str, default="/path/to/CANDOR/audios_token_glm_reconstructed",
                     help="Directory to save the quantized outputs")
 args = parser.parse_args()
 

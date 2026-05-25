@@ -1,5 +1,5 @@
 """GENMO renderer tools (vendored)."""
-# Adapted from: /simurgh/u/askhan1/winter26/Video-as-Action-Prompt/genmo/utils/vis/renderer_tools.py
+# Adapted from askhan1 GENMO utilities
 # Local copy for ViBES (light edits only).
 
 import math

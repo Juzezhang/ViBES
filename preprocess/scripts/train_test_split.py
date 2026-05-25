@@ -4,9 +4,9 @@ from pathlib import Path
 import argparse
 
 # Paths
-VIDEO_DIR = '/simurgh/u/juze/datasets/CANDOR/original'
-PROCESSED_DIR = '/simurgh/u/juze/datasets/CANDOR/FLAME_coeffs'
-SAVE_DIR = '/simurgh/u/juze/datasets/CANDOR'
+VIDEO_DIR = '/path/to/CANDOR/original'
+PROCESSED_DIR = '/path/to/CANDOR/FLAME_coeffs'
+SAVE_DIR = '/path/to/CANDOR'
 # Output filenames
 SPLITS = ['train', 'val', 'test']
 SPLIT_RATIOS = [0.95, 0.025, 0.025]

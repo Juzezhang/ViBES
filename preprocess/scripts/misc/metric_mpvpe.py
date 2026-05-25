@@ -545,7 +545,7 @@ def calculate_kid(real_activations, generated_activations):
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # 指定使用 GPU 0
 # 文件路径配置
-root_path = "/simurgh/u/juze/experiments/mgpt/VQVAE_AMASS_upper_lower_papervision/results/result/"
+root_path = "/path/to/experiments/mgpt/VQVAE_AMASS_upper_lower_papervision/results/result/"
 print(root_path)
 # base_path = "/nas/nas_32/AI-being/zhangjz/exp_motion/datasets/AMASS/reconstructed_motion/"
 

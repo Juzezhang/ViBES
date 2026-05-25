@@ -15,7 +15,7 @@ Additionally reports parameter-space metrics:
 Usage:
     python -m inference.test_face_tokenizer \
         --cfg configs/config_mixed_stage1_face.yaml \
-        --checkpoint /simurgh/u/juze/code/ViBES/model_files/pretrained_cpt/face/epoch=29.ckpt
+        --checkpoint ./model_files/pretrained_cpt/face/epoch=29.ckpt
 """
 import argparse
 import os
@@ -223,7 +223,7 @@ def main():
     parser.add_argument(
         "--checkpoint",
         type=str,
-        default="/simurgh/u/juze/code/ViBES/model_files/pretrained_cpt/face/epoch=29.ckpt",
+        default="./model_files/pretrained_cpt/face/epoch=29.ckpt",
     )
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--device", type=str, default="cuda:0")

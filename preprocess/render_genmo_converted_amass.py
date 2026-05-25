@@ -183,8 +183,8 @@ def render_amass_motion(smpl_params, out_path, width=1280, height=720, max_durat
 
 def main():
     # Configuration
-    input_dir = Path("/simurgh2/datasets/AMASS/amass_genmo_25")
-    output_dir = Path("/simurgh2/datasets/AMASS/rendered_outputs")
+    input_dir = Path("/path/to/AMASS/amass_genmo_25")
+    output_dir = Path("/path/to/AMASS/rendered_outputs")
     num_files = 3
     max_duration = 20.0  # Maximum duration in seconds
     os.makedirs(output_dir, exist_ok=True)
