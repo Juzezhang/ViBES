@@ -73,6 +73,10 @@ from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModel, AutoConfig
 from transformers.modeling_utils import load_sharded_checkpoint
 
+# Per-expert checkpoint loading (Expert-1-only checkpoints + GLM-base reconstruction of Expert-0)
+sys.path.insert(0, os.path.join(ROOT_DIR, "training"))
+from expert_io import is_expert1_checkpoint, load_expert1_checkpoint
+
 from speech_related.flow_inference import AudioDecoder
 from multimodal_tokenizers.utils.rotation_conversions import (
     rotation_6d_to_axis_angle,
@@ -224,8 +228,13 @@ def integrate_local_velocity(local_vel, global_orient_aa, init_pos=None):
     return pos
 
 
-def load_model(tokenizer_path, checkpoint_path, device):
-    """Load a model from config and checkpoint."""
+def load_model(tokenizer_path, checkpoint_path, device, glm_base_path="THUDM/glm-4-voice-9b"):
+    """Load a model from config and checkpoint.
+
+    Expert-1-only checkpoints (marked with expert_checkpoint.json) store just the trained motion
+    expert; the frozen text/audio expert (Expert-0) is reconstructed from the GLM-4-Voice base and
+    merged. Full checkpoints (no marker) load normally for backward compatibility.
+    """
     config = AutoConfig.from_pretrained(tokenizer_path, trust_remote_code=True)
     model = AutoModel.from_config(
         config,
@@ -233,7 +242,11 @@ def load_model(tokenizer_path, checkpoint_path, device):
         torch_dtype=torch.bfloat16 if device.startswith("cuda") else torch.float32,
         attn_implementation="flash_attention_2",
     ).to(device)
-    load_sharded_checkpoint(model, checkpoint_path)
+    if is_expert1_checkpoint(checkpoint_path):
+        print(f"  Detected Expert-1-only checkpoint; reconstructing Expert-0 from {glm_base_path}")
+        load_expert1_checkpoint(model, checkpoint_path, glm_base_path)
+    else:
+        load_sharded_checkpoint(model, checkpoint_path)
     model.eval()
     return model
 
@@ -585,6 +598,9 @@ def main():
     parser.add_argument('--checkpoint_body', type=str,
                         default=os.environ.get('VIBES_BODY_CKPT', './ViBES-Body'),
                         help='Path to body model checkpoint directory')
+    parser.add_argument('--glm_base_path', type=str, default="THUDM/glm-4-voice-9b",
+                        help='GLM-4-Voice base used to reconstruct the frozen text/audio expert '
+                             '(Expert-0) when a checkpoint is Expert-1-only. Ignored for full checkpoints.')
     parser.add_argument('--output_dir', type=str, default="./test_output",
                         help='Output directory for generated videos')
     parser.add_argument('--device', type=str, default="cuda", choices=["cuda", "cpu"],
@@ -634,11 +650,11 @@ def main():
 
     # Load face model
     print(f"\n=== Step 2: Load Face Model from {args.checkpoint_face} ===")
-    model_face = load_model(tokenizer_path, args.checkpoint_face, device)
+    model_face = load_model(tokenizer_path, args.checkpoint_face, device, args.glm_base_path)
 
     # Load body model
     print(f"\n=== Step 3: Load Body Model from {args.checkpoint_body} ===")
-    model_body = load_model(tokenizer_path, args.checkpoint_body, device)
+    model_body = load_model(tokenizer_path, args.checkpoint_body, device, args.glm_base_path)
 
     # Generate
     generate_face_body_from_text(

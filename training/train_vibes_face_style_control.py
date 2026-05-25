@@ -441,6 +441,10 @@ if __name__ == "__main__":
                         help="Resume training from a checkpoint path")
     parser.add_argument("--pretrained_model_path", type=str, default=None,
                         help="Pretrained model path")
+    parser.add_argument("--glm_base_path", type=str, default="THUDM/glm-4-voice-9b",
+                        help="GLM-4-Voice base providing the frozen Expert-0 (text/audio) weights. "
+                             "Checkpoints store only the trained motion Expert-1; Expert-0 is "
+                             "reconstructed from this base at load time.")
     # Add DeepSpeed local_rank argument
     parser.add_argument("--local_rank", type=int, default=-1,
                         help="Local rank for distributed training (used by DeepSpeed)")
@@ -583,7 +587,7 @@ if __name__ == "__main__":
         # )
 
         language_model_original = AutoModel.from_pretrained(
-            "/path/to/model_files/glm-4-voice-9b",
+            args.glm_base_path,
             trust_remote_code=True,
             torch_dtype=torch.bfloat16,
         )
@@ -701,8 +705,12 @@ if __name__ == "__main__":
         # deepspeed_port=29505,  # change this port to avoid conflict
     )
 
-    # Initialize Trainer
-    trainer = Trainer(
+    # Initialize Trainer. Use ExpertSaveTrainer so each checkpoint stores ONLY the trained
+    # motion expert (Expert-1) instead of the full ~20GB model (Expert-0 is the frozen
+    # GLM-4-Voice base, reconstructed at load via expert_io.load_expert1_checkpoint).
+    from expert_io import make_expert_save_trainer
+    ExpertSaveTrainer = make_expert_save_trainer(base=os.path.basename(args.glm_base_path.rstrip("/")))
+    trainer = ExpertSaveTrainer(
         model=language_model,
         args=training_args,
         train_dataset=dataset,

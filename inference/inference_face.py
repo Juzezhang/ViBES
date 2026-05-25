@@ -109,6 +109,10 @@ sys.path.insert(0, ROOT_DIR)
 # # Now import project-local modules (after dependencies, but with path re-asserted)
 # from qwen2_5_omni import ChatGLMForConditionalGenerationMotExpertNum2
 
+# Per-expert checkpoint loading (Expert-1-only checkpoints + GLM-base reconstruction of Expert-0)
+sys.path.insert(0, os.path.join(ROOT_DIR, "training"))
+from expert_io import is_expert1_checkpoint, load_expert1_checkpoint
+
 # Import conver_agent modules (after path setup)
 from multimodal_tokenizers.archs.lom_vq import VQVAEConvZeroDSUS1_PaperVersion
 from smplx import FLAME
@@ -535,6 +539,13 @@ def main():
         help='Path to the trained model checkpoint directory'
     )
     parser.add_argument(
+        '--glm_base_path',
+        type=str,
+        default="THUDM/glm-4-voice-9b",
+        help='GLM-4-Voice base used to reconstruct the frozen text/audio expert (Expert-0) '
+             'when --checkpoint is an Expert-1-only (motion) checkpoint. Ignored for full checkpoints.'
+    )
+    parser.add_argument(
         '--output_dir',
         type=str,
         default="./test_output",
@@ -611,9 +622,19 @@ def main():
         attn_implementation="flash_attention_2",
     ).to(device)
 
-    # Load model weights from checkpoint
+    # Load model weights from checkpoint.
+    # Expert-1-only checkpoints (marked with expert_checkpoint.json) store just the trained
+    # motion expert; reconstruct the frozen text/audio expert (Expert-0) from the GLM-4-Voice
+    # base and merge. Full checkpoints (no marker) load normally for backward compatibility.
     print(f"\n=== Step 3: Load Model Weights from {args.checkpoint} ===")
-    load_sharded_checkpoint(base_model, args.checkpoint)
+    if is_expert1_checkpoint(args.checkpoint):
+        print(f"  Detected Expert-1-only checkpoint; reconstructing Expert-0 from {args.glm_base_path}")
+        _, missing, unexpected = load_expert1_checkpoint(base_model, args.checkpoint, args.glm_base_path)
+        unexpected = [k for k in unexpected if "rotary_pos_emb" not in k]
+        if unexpected:
+            print(f"  Warning: {len(unexpected)} unexpected keys, e.g. {unexpected[:3]}")
+    else:
+        load_sharded_checkpoint(base_model, args.checkpoint)
 
     model = base_model
     model.eval()
