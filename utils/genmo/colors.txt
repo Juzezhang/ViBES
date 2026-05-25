@@ -1,4 +1,4 @@
-# Derived from: /simurgh/u/askhan1/winter26/Video-as-Action-Prompt/genmo/utils/colors.txt
+# Adapted from askhan1 GENMO utilities
 255 0 0
 0 255 0
 0 0 255

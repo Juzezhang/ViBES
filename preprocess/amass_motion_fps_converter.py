@@ -12,8 +12,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Argument parsing
 parser = argparse.ArgumentParser('exp_motion command line tools')
-parser.add_argument('--motion_folder', type=str, default="/simurgh/group/juze/datasets/AMASS/amass_data_align", help="Path to the folder containing motion files")
-parser.add_argument('--output_dir', type=str, default="/simurgh/group/juze/datasets/AMASS/amass_data_align_25",
+parser.add_argument('--motion_folder', type=str, default="/path/to/AMASS/amass_data_align", help="Path to the folder containing motion files")
+parser.add_argument('--output_dir', type=str, default="/path/to/AMASS/amass_data_align_25",
                     help="Directory to save the quantized outputs")
 args = parser.parse_args()
 

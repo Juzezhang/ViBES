@@ -171,7 +171,7 @@ class MixedDatasetLLM(data.Dataset):
             self.metadata_candor = []
             return
         
-        data_root = self.args["CANDOR"].ROOT if "CANDOR" in self.args else "/simurgh/u/juze/datasets/CANDOR"
+        data_root = self.args["CANDOR"].ROOT if "CANDOR" in self.args else "/path/to/CANDOR"
         
         print(f"Loading preprocessed CANDOR dataset...")
         

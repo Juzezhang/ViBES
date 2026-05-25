@@ -1,12 +1,12 @@
 import numpy as np
 
 
-# pose_file_beat2 = "/simurgh/u/juze/datasets/BEAT2/beat_english_v2.0.0/smplxflame_30/10_kieks_0_10_10.npz"
+# pose_file_beat2 = "/path/to/BEAT2/beat_english_v2.0.0/smplxflame_30/10_kieks_0_10_10.npz"
 # pose_data_beat2 = np.load(pose_file_beat2, allow_pickle=True)
 
 # print(pose_data_beat2.files)  
 
-pose_file_amass = "/simurgh/u/juze/datasets/AMASS/amass_data_align/001578.npz"
+pose_file_amass = "/path/to/AMASS/amass_data_align/001578.npz"
 pose_data_amass = np.load(pose_file_amass, allow_pickle=True)
 
 print("AMASS data keys:", pose_data_amass.files)

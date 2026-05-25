@@ -1,5 +1,5 @@
 CONFIG_FOLDER: configs # Config files path
-FOLDER: /simurgh2/users/juze/experiments # Experiment files saving path
+FOLDER: /path/to/experiments # Experiment files saving path
 
 TEST:
   FOLDER: results # Testing files saving path
@@ -13,31 +13,31 @@ DATASET:
   TRANSFORM_PATH: ${DATASET.MODEL_FILES_DIR}/transforms/
   WORD_VERTILIZER_PATH: ${DATASET.MODEL_FILES_DIR}/t2m_evaluators/glove/
   HUMANML3D:
-    ROOT: "/simurgh2/datasets/HumanML3D" # HumanML3D directory
-    SPLIT_ROOT: "/simurgh2/datasets/HumanML3D" # HumanML3D splits directory
+    ROOT: "/path/to/HumanML3D" # HumanML3D directory
+    SPLIT_ROOT: "/path/to/HumanML3D" # HumanML3D splits directory
     MEAN_STD_PATH: models/t2m/
   BEAT2:
-    ROOT: /simurgh2/datasets/BEAT2/beat_english_v2.0.0 # BEAT2 directory 
+    ROOT: /path/to/BEAT2/beat_english_v2.0.0 # BEAT2 directory 
   AMASS:
-    ROOT: /simurgh2/datasets/AMASS # AMASS directory 
+    ROOT: /path/to/AMASS # AMASS directory 
   AMASS_talking:
-    ROOT: /simurgh2/datasets/AMASS_talking # AMASS_talking directory 
+    ROOT: /path/to/AMASS_talking # AMASS_talking directory 
   AMASS_P2P:
-    ROOT: /simurgh2/datasets/AMASS_p2p # AMASS_P2P directory 
+    ROOT: /path/to/AMASS_p2p # AMASS_P2P directory 
   LIBRISPEECH:
-    ROOT: "/simurgh2/datasets/LibriSpeech" # LibriSpeech directory  
+    ROOT: "/path/to/LibriSpeech" # LibriSpeech directory  
   CANDOR:
-    ROOT: "/simurgh/u/juze/datasets/CANDOR" # CANDOR directory  
+    ROOT: "/path/to/CANDOR" # CANDOR directory  
   TFHP:
-    ROOT: "/simurgh/u/juze/datasets/TFHP" # TFHP directory  
+    ROOT: "/path/to/TFHP" # TFHP directory  
   YouTube_Talking:
-    ROOT: "/simurgh/group/juze/datasets/YouTube_Talking" # YouTube_Talking directory  
+    ROOT: "/path/to/YouTube_Talking" # YouTube_Talking directory  
   YouTube_Talking_Synthetic:
-    ROOT: "/simurgh/group/juze/datasets/YouTube_Talking_Synthetic" # YouTube_Talking_Synthetic directory  
+    ROOT: "/path/to/YouTube_Talking_Synthetic" # YouTube_Talking_Synthetic directory  
   AMASS_Genmo:
-    ROOT: "/simurgh2/datasets/AMASS" # AMASS_Genmo directory  
+    ROOT: "/path/to/AMASS" # AMASS_Genmo directory  
   BEAT2_Genmo:
-    ROOT: "/simurgh2/datasets/BEAT2/beat_english_v2.0.0" # BEAT2_Genmo directory  
+    ROOT: "/path/to/BEAT2/beat_english_v2.0.0" # BEAT2_Genmo directory  
 
 
 

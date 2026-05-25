@@ -116,19 +116,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--body_dir",
         type=Path,
-        default=Path("/simurgh/u/juze/code/conversational_agent/paper_result/video/dataset/body"),
+        default=Path("/path/to/conversational_agent/paper_result/video/dataset/body"),
         help="Directory containing body videos.",
     )
     parser.add_argument(
         "--face_dir",
         type=Path,
-        default=Path("/simurgh/u/juze/code/conversational_agent/paper_result/video/dataset/face"),
+        default=Path("/path/to/conversational_agent/paper_result/video/dataset/face"),
         help="Directory containing face videos.",
     )
     parser.add_argument(
         "--output_dir",
         type=Path,
-        default=Path("/simurgh/u/juze/code/conversational_agent/paper_result/video/dataset/merged_body_face"),
+        default=Path("/path/to/conversational_agent/paper_result/video/dataset/merged_body_face"),
         help="Directory to store merged videos.",
     )
     parser.add_argument(

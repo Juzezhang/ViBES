@@ -187,19 +187,19 @@ def merge_videos_with_frame_numbers_moviepy(video_paths, audio_path, output_path
 def main():
     # Define directories
     # directories = [
-    #     "/simurgh/u/juze/code/conversational_agent/paper_result/a2f/ours_wo_head_pose_layernum_40",
-    #     "/simurgh/u/juze/code/conversational_agent/paper_result/a2f/artalk_wo_head_pose",
-    #     "/simurgh/u/juze/code/conversational_agent/paper_result/a2f/diffposetalk_wo_head_pose",
-    #     "/simurgh/u/juze/code/conversational_agent/paper_result/a2f/scantalk_wo_head_pose",
-    #     "/simurgh/u/juze/code/conversational_agent/paper_result/a2f/multitalk_wo_head_pose",
+    #     "/path/to/conversational_agent/paper_result/a2f/ours_wo_head_pose_layernum_40",
+    #     "/path/to/conversational_agent/paper_result/a2f/artalk_wo_head_pose",
+    #     "/path/to/conversational_agent/paper_result/a2f/diffposetalk_wo_head_pose",
+    #     "/path/to/conversational_agent/paper_result/a2f/scantalk_wo_head_pose",
+    #     "/path/to/conversational_agent/paper_result/a2f/multitalk_wo_head_pose",
     # ]
-    # output_dir = "/simurgh/u/juze/code/conversational_agent/paper_result/a2f/compare_layernum_40"
+    # output_dir = "/path/to/conversational_agent/paper_result/a2f/compare_layernum_40"
     directories = [
-        "/simurgh/u/juze/code/conversational_agent/paper_result/a2f/ours_with_head_pose_layernum_40",
-        "/simurgh/u/juze/code/conversational_agent/paper_result/a2f/artalk",
-        "/simurgh/u/juze/code/conversational_agent/paper_result/a2f/diffposetalk",
+        "/path/to/conversational_agent/paper_result/a2f/ours_with_head_pose_layernum_40",
+        "/path/to/conversational_agent/paper_result/a2f/artalk",
+        "/path/to/conversational_agent/paper_result/a2f/diffposetalk",
     ]
-    output_dir = "/simurgh/u/juze/code/conversational_agent/paper_result/a2f/compare_layernum_40_with_head_pose"
+    output_dir = "/path/to/conversational_agent/paper_result/a2f/compare_layernum_40_with_head_pose"
 
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)

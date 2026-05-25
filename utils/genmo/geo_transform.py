@@ -1,5 +1,5 @@
 """Minimal geometry transforms used by GENMO render scripts."""
-# Derived from: /simurgh/u/askhan1/winter26/Video-as-Action-Prompt/genmo/utils/geo_transform.py
+# Adapted from askhan1 GENMO utilities
 # Simplified for local rendering utilities.
 from __future__ import annotations
 

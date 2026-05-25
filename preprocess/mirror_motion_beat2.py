@@ -36,10 +36,10 @@ def parse_arguments():
                        default="./model_files/smplx_models", 
                        help="Path to SMPL-X model files")
     parser.add_argument("--dataset_path_original", type=str, required=False, 
-                       default="/scr/juze/datasets/BEAT2/beat_english_v2.0.0/smplxflame_25", 
+                       default="/path/to/BEAT2/beat_english_v2.0.0/smplxflame_25", 
                        help="Path to original BEAT2 dataset")
     parser.add_argument("--dataset_path_processed", type=str, required=False, 
-                       default="/scr/juze/datasets/BEAT2/beat_english_v2.0.0/smplxflame_25_mirror", 
+                       default="/path/to/BEAT2/beat_english_v2.0.0/smplxflame_25_mirror", 
                        help="Path to processed BEAT2 dataset")
     parser.add_argument("--index_path", type=str, required=False, 
                        default="./preprocess/index.csv", 

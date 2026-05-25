@@ -54,10 +54,10 @@ def check_overlaps(train_ids: Set[str], val_ids: Set[str], test_ids: Set[str]) -
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--audio-dir", type=Path,
-        default=Path("/simurgh/group/juze/datasets/YouTube_Talking_Synthetic/audios"),
+        default=Path("/path/to/YouTube_Talking_Synthetic/audios"),
         help="Directory containing subsequence .wav files (e.g., 202008675_0018.wav).")
     ap.add_argument("--splits-dir", type=Path,
-        default=Path("/simurgh/u/juze/code/conversational_agent/datasets/YouTube_Talking"),
+        default=Path("/path/to/conversational_agent/datasets/YouTube_Talking"),
         help="Directory containing train/val/test *_processed.txt and *_unprocessed.txt.")
     ap.add_argument("--output-dir", type=Path, default=None,
         help="Where to write train/val/test.txt. Default: parent of --audio-dir.")

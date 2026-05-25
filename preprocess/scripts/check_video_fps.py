@@ -3,7 +3,7 @@ import cv2
 from pathlib import Path
 import sys
 
-VIDEO_DIR = '/simurgh/group/juze/datasets/YouTube_Talking/video_20241226'
+VIDEO_DIR = '/path/to/YouTube_Talking/video_20241226'
 VIDEO_EXTENSIONS = ['.mp4', '.avi', '.mov', '.mkv']
 
 # Suppress OpenCV/FFmpeg stderr output

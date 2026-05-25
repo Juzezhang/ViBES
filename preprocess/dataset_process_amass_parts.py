@@ -473,13 +473,13 @@ def parse_arguments():
     parser.add_argument(
         "--dataset_path_original",
         type=str,
-        default="/simurgh2/datasets/AMASS_original_smplx",
+        default="/path/to/AMASS_original_smplx",
         help="Path to original AMASS dataset",
     )
     parser.add_argument(
         "--dataset_path_processed",
         type=str,
-        default="/simurgh2/datasets/AMASS",
+        default="/path/to/AMASS",
         help="Path to processed AMASS dataset root",
     )
     parser.add_argument(
@@ -503,7 +503,7 @@ def parse_arguments():
     parser.add_argument(
         "--smplx_path",
         type=str,
-        default="/simurgh/u/juze/code/ViBES/model_files/smplx_models",
+        default="./model_files/smplx_models",
         help="Path to SMPLX model files (parent directory, smplx.create will append /smplx)",
     )
     parser.add_argument(

@@ -358,19 +358,19 @@ def parse_arguments():
     parser.add_argument(
         "--input_dir",
         type=str,
-        default="/simurgh2/datasets/BEAT2/beat_english_v2.0.0",
+        default="/path/to/BEAT2/beat_english_v2.0.0",
         help="Path to BEAT2 dataset root",
     )
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="/simurgh2/datasets/BEAT2/beat_english_v2.0.0/beat2_parts_25",
+        default="/path/to/BEAT2/beat_english_v2.0.0/beat2_parts_25",
         help="Output directory for Upper+Lower format data",
     )
     parser.add_argument(
         "--smplx_path",
         type=str,
-        default="/simurgh/u/juze/code/ViBES/model_files/smplx_models",
+        default="./model_files/smplx_models",
         help="Path to SMPLX model files (parent directory, smplx.create will append /smplx)",
     )
     parser.add_argument(

@@ -2,9 +2,9 @@
 Extract audio segments based on TalkNet speaking segments.
 
 Defaults:
-- Input audios:     /simurgh/group/juze/datasets/YouTube_Talking/audios
-- TalkNet outputs:  /simurgh/group/juze/datasets/YouTube_Talking/talknet_output
-- Output segments:  /simurgh/group/juze/datasets/YouTube_Talking_Synthetic/audios
+- Input audios:     /path/to/YouTube_Talking/audios
+- TalkNet outputs:  /path/to/YouTube_Talking/talknet_output
+- Output segments:  /path/to/YouTube_Talking_Synthetic/audios
 
 For each audio file, we find its speaking segments from TalkNet results (by matching the
 file's stem as the video_id), slice the audio accordingly, and save each segment to the
@@ -34,9 +34,9 @@ import subprocess
 # =====================
 # Configuration defaults
 # =====================
-DEFAULT_AUDIO_DIR = "/simurgh/group/juze/datasets/YouTube_Talking/audios_original"
-DEFAULT_TALKNET_DIR = "/simurgh/group/juze/datasets/YouTube_Talking/talknet_output"
-DEFAULT_OUTPUT_DIR = "/simurgh/group/juze/datasets/YouTube_Talking_Synthetic/audios"
+DEFAULT_AUDIO_DIR = "/path/to/YouTube_Talking/audios_original"
+DEFAULT_TALKNET_DIR = "/path/to/YouTube_Talking/talknet_output"
+DEFAULT_OUTPUT_DIR = "/path/to/YouTube_Talking_Synthetic/audios"
 DEFAULT_SUFFIX = "_"
 MIN_SEGMENT_DURATION = 2.0  # seconds; discard merged segments shorter than this
 

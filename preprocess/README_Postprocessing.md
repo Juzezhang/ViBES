@@ -12,10 +12,10 @@ Before running motion tokenization, specify the checkpoint paths in the configur
 
 ```yaml
 TEST:
-  CHECKPOINTS_FACE: '/simurgh/u/juze/code/ViBES/model_files/pretrained_cpt/face/face.ckpt'
-  CHECKPOINTS_HAND: /simurgh/u/juze/code/conversational_agent/model_files/pretrained_cpt/lom_vq_ds_new/lom_vq.ckpt
-  CHECKPOINTS_UPPER: /simurgh/u/juze/code/conversational_agent/model_files/pretrained_cpt/lom_vq_ds_new/lom_vq.ckpt
-  CHECKPOINTS_LOWER: /simurgh/u/juze/code/conversational_agent/model_files/pretrained_cpt/lom_vq_ds_new/lom_vq.ckpt
+  CHECKPOINTS_FACE: './model_files/pretrained_cpt/face/face.ckpt'
+  CHECKPOINTS_HAND: /path/to/conversational_agent/model_files/pretrained_cpt/lom_vq_ds_new/lom_vq.ckpt
+  CHECKPOINTS_UPPER: /path/to/conversational_agent/model_files/pretrained_cpt/lom_vq_ds_new/lom_vq.ckpt
+  CHECKPOINTS_LOWER: /path/to/conversational_agent/model_files/pretrained_cpt/lom_vq_ds_new/lom_vq.ckpt
   CHECKPOINTS_GLOBAL: ''
 ```
 

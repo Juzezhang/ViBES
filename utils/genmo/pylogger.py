@@ -1,5 +1,5 @@
 """Minimal logger API compatible with GENMO's Log usage."""
-# Derived from: /simurgh/u/askhan1/winter26/Video-as-Action-Prompt/genmo/utils/pylogger.py
+# Adapted from askhan1 GENMO utilities
 # Simplified for local rendering utilities.
 from __future__ import annotations
 

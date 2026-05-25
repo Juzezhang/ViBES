@@ -82,16 +82,16 @@ def download_dir(gcs_prefix: str, local_dir: str):
 
 if __name__ == "__main__":
     # 上传整个目录
-    # upload_dir("/simurgh2/datasets/BEAT2/beat_english_v2.0.0/smplxflame_25", "BEAT2/beat_english_v2.0.0/smplxflame_25")
-    # upload_dir("/simurgh2/datasets/BEAT2/beat_english_v2.0.0/smplxflame_25_mirror", "BEAT2/beat_english_v2.0.0/smplxflame_25_mirror")
-    # upload_dir("/simurgh2/datasets/BEAT2/beat_english_v2.0.0/TOKENS_AGENT_25", "BEAT2/beat_english_v2.0.0/TOKENS_AGENT_25")
-    # upload_dir("/simurgh2/datasets/BEAT2/beat_english_v2.0.0/textgrid", "BEAT2/beat_english_v2.0.0/textgrid")
-    # upload_dir("/simurgh2/datasets/BEAT2/beat_english_v2.0.0/wave16k", "BEAT2/beat_english_v2.0.0/wave16k")
-    # upload_dir("/simurgh2/datasets/BEAT2/beat_english_v2.0.0/weights", "BEAT2/beat_english_v2.0.0/weights")
-    # upload_dir("/simurgh2/datasets/BEAT2/beat_english_v2.0.0/train_test_split.csv", "BEAT2/beat_english_v2.0.0")
-    # upload_dir("/simurgh2/datasets/BEAT2/beat_english_v2.0.0/sem", "BEAT2/beat_english_v2.0.0/sem")
-    # upload_dir("/scr/juze/datasets/BEAT2/beat_english_v2.0.0/processed_beat2_dataset_tokenized_mot_encode_position_body_v3_train", "BEAT2/beat_english_v2.0.0/processed_beat2_dataset_tokenized_mot_encode_position_body_v3_train")
-    upload_dir("/simurgh2/datasets/AMASS/amass_parts_25", "AMASS/amass_parts_25")
+    # upload_dir("/path/to/BEAT2/beat_english_v2.0.0/smplxflame_25", "BEAT2/beat_english_v2.0.0/smplxflame_25")
+    # upload_dir("/path/to/BEAT2/beat_english_v2.0.0/smplxflame_25_mirror", "BEAT2/beat_english_v2.0.0/smplxflame_25_mirror")
+    # upload_dir("/path/to/BEAT2/beat_english_v2.0.0/TOKENS_AGENT_25", "BEAT2/beat_english_v2.0.0/TOKENS_AGENT_25")
+    # upload_dir("/path/to/BEAT2/beat_english_v2.0.0/textgrid", "BEAT2/beat_english_v2.0.0/textgrid")
+    # upload_dir("/path/to/BEAT2/beat_english_v2.0.0/wave16k", "BEAT2/beat_english_v2.0.0/wave16k")
+    # upload_dir("/path/to/BEAT2/beat_english_v2.0.0/weights", "BEAT2/beat_english_v2.0.0/weights")
+    # upload_dir("/path/to/BEAT2/beat_english_v2.0.0/train_test_split.csv", "BEAT2/beat_english_v2.0.0")
+    # upload_dir("/path/to/BEAT2/beat_english_v2.0.0/sem", "BEAT2/beat_english_v2.0.0/sem")
+    # upload_dir("/path/to/BEAT2/beat_english_v2.0.0/processed_beat2_dataset_tokenized_mot_encode_position_body_v3_train", "BEAT2/beat_english_v2.0.0/processed_beat2_dataset_tokenized_mot_encode_position_body_v3_train")
+    upload_dir("/path/to/AMASS/amass_parts_25", "AMASS/amass_parts_25")
 
     # # 下载整个目录
     # download_dir("datasets/juze/data", "./data_downloaded")

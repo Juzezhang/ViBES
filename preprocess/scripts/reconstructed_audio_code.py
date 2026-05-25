@@ -17,8 +17,8 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 # Argument parsing
 parser = argparse.ArgumentParser('exp_motion command line tools')
-parser.add_argument('--token_folder', type=str, default="/simurgh/u/juze/datasets/CANDOR/audios_token_glm/", help="Path to the folder containing .wav files")
-parser.add_argument('--output_dir', type=str, default="/simurgh/u/juze/datasets/CANDOR/audios_token_glm_reconstructed",
+parser.add_argument('--token_folder', type=str, default="/path/to/CANDOR/audios_token_glm/", help="Path to the folder containing .wav files")
+parser.add_argument('--output_dir', type=str, default="/path/to/CANDOR/audios_token_glm_reconstructed",
                     help="Directory to save the quantized outputs")
 args = parser.parse_args()
 
@@ -137,7 +137,7 @@ for subfolder in tqdm(os.listdir(token_folder)):
                 token_path = join(token_folder, subfolder, token_file)
                 output_sub_dir = join(output_dir, subfolder)
                 os.makedirs(output_sub_dir, exist_ok=True)
-                original_wav_path = join('/simurgh/group/yuheng/CANDOR_processed/', subfolder, token_file.replace(".npy", ".mp3"))
+                original_wav_path = join('/path/to/CANDOR_processed/', subfolder, token_file.replace(".npy", ".mp3"))
                 output_path = join(output_sub_dir, token_file.replace(".npy", ".wav"))
 
                 if os.path.exists(output_path):
