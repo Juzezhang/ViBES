@@ -25,8 +25,16 @@ python inference/inference_face.py \
 |---|---|---|
 | `--user_text` | (required) | Text prompt to convert into a conversational response |
 | `--output_dir` | `results/face/` | Output directory for the generated video |
-| `--checkpoint` | from config | Override the face-expert checkpoint path |
+| `--checkpoint` | `./ViBES-Face` | Path to the face-expert checkpoint directory |
+| `--glm_base_path` | `THUDM/glm-4-voice-9b` | GLM-4-Voice base used to reconstruct the frozen text/audio expert (see note) |
 | `--device` | `cuda:0` | GPU device |
+
+> **Loading the released checkpoint.** `ViBES-Face` (and the body checkpoint) store **only the trained
+> motion expert (~0.86 GB)**, marked by `expert_checkpoint.json`. The inference scripts detect this
+> marker and reconstruct the frozen text/audio expert from `--glm_base_path`, merging the two into the
+> full model automatically (bit-identical to a full checkpoint). Point `--glm_base_path` at the
+> GLM-4-Voice base you downloaded during setup to avoid a duplicate ~18 GB download. Older full
+> checkpoints (no marker) still load normally.
 
 Output: `<output_dir>/<timestamp>/result.mp4` plus intermediate token / audio files.
 

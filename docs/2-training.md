@@ -86,6 +86,7 @@ Key arguments:
 | `--save_steps` | `1000` | Checkpoint cadence |
 | `--save_total_limit` | `5` | Keep last-N rolling checkpoints |
 | `--resume_from_checkpoint` | `.../checkpoint-NNNN` | Resume a crashed run |
+| `--glm_base_path` | `THUDM/glm-4-voice-9b` | GLM-4-Voice base for the frozen text/audio expert (Expert-0). Also the source reconstructed at load time for per-expert checkpoints |
 
 The DeepSpeed launcher injects `--local_rank` automatically; don't set it by hand.
 
@@ -146,6 +147,15 @@ Stage 1 and Stage 2 use different configuration styles:
 - Saves every `--save_steps` to `<output_dir>/checkpoint-<step>/`
 - Keeps the last `--save_total_limit` rolling checkpoints
 - Resume with `--resume_from_checkpoint <output_dir>/checkpoint-<step>`
+
+> **Per-expert checkpoints.** The MoME model has two experts: Expert-0 (text/audio) is *frozen* and
+> identical to the GLM-4-Voice base, while Expert-1 (motion) is the only part trained. To avoid
+> re-saving the ~19 GB frozen expert in every checkpoint, the gathered model file stores **only the
+> motion expert (~0.86 GB)**, marked by `expert_checkpoint.json`. Expert-0 is reconstructed from
+> `--glm_base_path` and merged at load time (bit-identical to a full checkpoint). DeepSpeed resume
+> shards (`global_step*/`) are untouched, so `--resume_from_checkpoint` works unchanged. The helper
+> logic lives in [`training/expert_io.py`](../training/expert_io.py); to shrink an existing full
+> checkpoint after the fact, use `scripts/split_expert_checkpoint.py`.
 
 **Stage 1 checkpoint output** (Lightning `ModelCheckpoint`, configured in `multimodal_tokenizers/callback.py`):
 

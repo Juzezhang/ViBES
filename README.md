@@ -58,13 +58,17 @@ pip install "chumpy==0.70" --no-build-isolation
 chmod +x ./scripts/patch_chumpy_numpy2.sh
 ./scripts/patch_chumpy_numpy2.sh
 
-# Download GLM-4-Voice components
+# Download GLM-4-Voice components (cosyvoice, speech tokenizer, decoder)
 ./scripts/download_glm4voice_modules.sh
+
+# Download the GLM-4-Voice base model (provides the frozen text/audio expert; ~18 GB)
+huggingface-cli download THUDM/glm-4-voice-9b --local-dir ./model_files/glm-4-voice-9b
 
 # Build resources
 ./scripts/build_resources.sh
 
-# Download our pretrained model
+# Download our pretrained face model
+# (motion expert only, ~0.86 GB; the frozen text/audio expert is reconstructed from the GLM base at load)
 huggingface-cli download JuzeZhang/ViBES-Face --local-dir ./ViBES-Face
 ```
 
@@ -80,8 +84,16 @@ For SMPL-X / FLAME body models, sign up on https://smpl-x.is.tue.mpg.de and http
 <summary><b>Conversation with Text input</b></summary>
 
 ```bash
-python inference/inference_face.py --user_text "If you had a superpower for one day, what would you choose?"
+python inference/inference_face.py \
+    --checkpoint ./ViBES-Face \
+    --glm_base_path ./model_files/glm-4-voice-9b \
+    --user_text "If you had a superpower for one day, what would you choose?"
 ```
+
+> `--checkpoint ./ViBES-Face` is our pretrained face model (downloaded above; this is also the
+> default). It ships the trained **motion expert only** — the frozen text/audio expert is
+> reconstructed from the GLM-4-Voice base, so pass `--glm_base_path` to point at the base you
+> downloaded above (it defaults to `THUDM/glm-4-voice-9b`, which auto-downloads to the HF cache).
 
 Demo output
 
