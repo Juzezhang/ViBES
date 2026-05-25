@@ -2,7 +2,7 @@ from glob import glob
 import os
 from tqdm import tqdm
 import numpy as np
-from conver_agent.data.mixed_dataset.data_tools import joints_list
+from multimodal_tokenizers.data.mixed_dataset.data_tools import joints_list
 
 upbody = '/nas/nas_32/AI-being/zhangjz/exp_motion/paper_result/vq_abalation/upper/result/gt/'
 lowbody = '/nas/nas_32/AI-being/zhangjz/exp_motion/paper_result/vq_abalation/lower/result/rec/'

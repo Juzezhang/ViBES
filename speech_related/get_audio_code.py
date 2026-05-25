@@ -5,7 +5,7 @@ import numpy as np
 from os.path import join
 import argparse
 from tqdm import tqdm
-from conver_agent.archs.hubert.hubert_tokenizer import HubertTokenizer
+from multimodal_tokenizers.archs.hubert.hubert_tokenizer import HubertTokenizer
 
 def load_audio(path):
     wav, sr = torchaudio.load(path)
@@ -51,8 +51,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Argument parsing
 parser = argparse.ArgumentParser('exp_motion command line tools')
-parser.add_argument('--wav_folder', type=str, default="/simurgh/group/yuheng/CANDOR_processed/", help="Path to the folder containing .wav files")
-parser.add_argument('--output_dir', type=str, default="/simurgh/u/juze/datasets/CANDOR/audios_token_hubert",
+parser.add_argument('--wav_folder', type=str, default="/path/to/CANDOR_processed/", help="Path to the folder containing .wav files")
+parser.add_argument('--output_dir', type=str, default="/path/to/CANDOR/audios_token_hubert",
                     help="Directory to save the quantized outputs")
 args = parser.parse_args()
 

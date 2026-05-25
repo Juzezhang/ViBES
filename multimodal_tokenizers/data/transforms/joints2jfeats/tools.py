@@ -17,7 +17,7 @@
 import torch
 import torch.nn.functional as F
 
-from conver_agent.utils.joints import mmm_joints
+from multimodal_tokenizers.utils.joints import mmm_joints
 
 # Get the indexes of particular body part SMPLH case
 # Feet

@@ -614,6 +614,11 @@ class MotionGPTVQVaeAdapter(nn.Module):
         super().__init__()
         # Allow configs to pass ViBES-style aliases without breaking MotionGPT init
         kwargs.pop("vae_test_dim", None)
+        # SAMPA-style parameter aliases
+        if "input_dim" in kwargs:
+            kwargs["nfeats"] = kwargs.pop("input_dim")
+        if "nb_code" in kwargs:
+            kwargs["code_num"] = kwargs.pop("nb_code")
         self.vqvae = MotionGPTVQVae(**kwargs)
 
     def forward(self, inputs: torch.Tensor):

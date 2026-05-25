@@ -2,8 +2,7 @@
 # =============================================================================
 # ViBES Motion Vector Preprocessing Script
 # =============================================================================
-# This script converts raw SMPL-X data to motion vector formats and computes
-# normalization statistics.
+# This script converts raw SMPL-X data to motion vector formats.
 #
 # Usage:
 #   ./preprocess/run_preprocessing.sh [OPTIONS]
@@ -11,7 +10,6 @@
 # Options:
 #   --format FORMAT    Only process specific format: lower, upper_lower, genmo, all (default: all)
 #   --dataset DATASET  Only process specific dataset: beat2, amass, all (default: all)
-#   --skip-norm        Skip normalization computation
 #   --dry-run          Print commands without executing
 #   --max-files N      Limit files per directory (for testing)
 #
@@ -27,24 +25,20 @@ set -e  # Exit on error
 # =============================================================================
 # Configuration - Modify these paths as needed
 # =============================================================================
-VIBES_ROOT="/simurgh/u/juze/code/ViBES"
+VIBES_ROOT="/path/to/ViBES"
 SMPLX_PATH="${VIBES_ROOT}/model_files/smplx_models"
 INDEX_PATH="${VIBES_ROOT}/preprocess/index.csv"
 
 # Dataset paths
-BEAT2_ROOT="/simurgh2/datasets/BEAT2/beat_english_v2.0.0"
-AMASS_ORIGINAL="/simurgh2/datasets/AMASS_original_smplx"
-AMASS_PROCESSED="/simurgh2/datasets/AMASS"
-
-# Output paths
-NORM_STATS_ROOT="/simurgh2/datasets/normalization_stats"
+BEAT2_ROOT="/path/to/BEAT2/beat_english_v2.0.0"
+AMASS_ORIGINAL="/path/to/AMASS_original_smplx"
+AMASS_PROCESSED="/path/to/AMASS"
 
 # =============================================================================
 # Parse arguments
 # =============================================================================
 FORMAT="all"
 DATASET="all"
-SKIP_NORM=false
 DRY_RUN=false
 MAX_FILES=""
 
@@ -57,10 +51,6 @@ while [[ $# -gt 0 ]]; do
         --dataset)
             DATASET="$2"
             shift 2
-            ;;
-        --skip-norm)
-            SKIP_NORM=true
-            shift
             ;;
         --dry-run)
             DRY_RUN=true
@@ -100,7 +90,6 @@ echo "ViBES Motion Vector Preprocessing"
 echo "=============================================="
 echo "Format: $FORMAT"
 echo "Dataset: $DATASET"
-echo "Skip normalization: $SKIP_NORM"
 echo "Dry run: $DRY_RUN"
 echo "Max files: ${MAX_FILES:-unlimited}"
 echo ""
@@ -193,42 +182,6 @@ if [ "$FORMAT" = "genmo" ] || [ "$FORMAT" = "all" ]; then
 fi
 
 # =============================================================================
-# Compute Normalization Statistics
-# =============================================================================
-if [ "$SKIP_NORM" = false ]; then
-
-    # Lower normalization
-    if [ "$FORMAT" = "lower" ] || [ "$FORMAT" = "all" ]; then
-        run_cmd "Compute Lower normalization stats" \
-            "python preprocess/compute_normalization_stats.py \
-                --format lower \
-                --data_dirs ${BEAT2_ROOT}/beat2_lower_25 ${AMASS_PROCESSED}/amass_lower_25 \
-                --output_dir ${NORM_STATS_ROOT}/lower_25 \
-                --verify"
-    fi
-
-    # Upper+Lower normalization
-    if [ "$FORMAT" = "upper_lower" ] || [ "$FORMAT" = "all" ]; then
-        run_cmd "Compute Upper+Lower normalization stats" \
-            "python preprocess/compute_normalization_stats.py \
-                --format upper_lower \
-                --data_dirs ${BEAT2_ROOT}/beat2_parts_25 ${AMASS_PROCESSED}/amass_parts_25 \
-                --output_dir ${NORM_STATS_ROOT}/parts_25 \
-                --verify"
-    fi
-
-    # GENMO normalization
-    if [ "$FORMAT" = "genmo" ] || [ "$FORMAT" = "all" ]; then
-        run_cmd "Compute GENMO normalization stats" \
-            "python preprocess/compute_normalization_stats.py \
-                --format genmo \
-                --data_dirs ${BEAT2_ROOT}/beat2_genmo_25 ${AMASS_PROCESSED}/amass_genmo_25 \
-                --output_dir ${NORM_STATS_ROOT}/genmo_25 \
-                --verify"
-    fi
-fi
-
-# =============================================================================
 # Summary
 # =============================================================================
 echo ""
@@ -248,8 +201,4 @@ fi
 if [ "$FORMAT" = "genmo" ] || [ "$FORMAT" = "all" ]; then
     echo "  GENMO:       ${BEAT2_ROOT}/beat2_genmo_25"
     echo "               ${AMASS_PROCESSED}/amass_genmo_25"
-fi
-if [ "$SKIP_NORM" = false ]; then
-    echo ""
-    echo "Normalization stats: ${NORM_STATS_ROOT}/"
 fi

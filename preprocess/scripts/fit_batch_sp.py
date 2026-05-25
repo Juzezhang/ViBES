@@ -9,10 +9,10 @@ import smplx
 import trimesh
 import h5py
 from pathlib import Path
-from conver_agent.data.transforms.joints2rots import config
-from conver_agent.data.transforms.joints2rots.smplify import SMPLify3D
-from conver_agent.utils.joints import mmm_to_smplh_scaling_factor
-from conver_agent.utils.temos_utils import subsample
+from multimodal_tokenizers.data.transforms.joints2rots import config
+from multimodal_tokenizers.data.transforms.joints2rots.smplify import SMPLify3D
+from multimodal_tokenizers.utils.joints import mmm_to_smplh_scaling_factor
+from multimodal_tokenizers.utils.temos_utils import subsample
 from scripts.plys2npy import plys2npy
 import random
 

@@ -11,7 +11,7 @@ import numpy as np
 import torch
 from pathlib import Path
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from conver_agent.utils.token_utils import (
+from multimodal_tokenizers.utils.token_utils import (
     prepare_multimodal_tokens_for_lm,
     separate_audio_face_tokens
 )

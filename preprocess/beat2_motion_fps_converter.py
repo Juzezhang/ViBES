@@ -11,10 +11,13 @@ from scipy import interpolate
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Argument parsing
-parser = argparse.ArgumentParser('exp_motion command line tools')
-parser.add_argument('--motion_folder', type=str, default="/scr/juze/datasets/BEAT2/beat_english_v2.0.0/smplxflame_30/", help="Path to the folder containing motion files")
-parser.add_argument('--output_dir', type=str, default="/scr/juze/datasets/BEAT2/beat_english_v2.0.0/smplxflame_25",
-                    help="Directory to save the quantized outputs")
+parser = argparse.ArgumentParser(
+    description="Downsample BEAT2 SMPL-X motion files from 30 fps to 25 fps.",
+)
+parser.add_argument('--motion_folder', type=str, required=True,
+                    help="[INPUT] BEAT2 SMPL-X folder at 30 fps (e.g. <BEAT2_ROOT>/smplxflame_30).")
+parser.add_argument('--output_dir', type=str, required=True,
+                    help="[OUTPUT] Where to write the 25-fps version (e.g. <BEAT2_ROOT>/smplxflame_25).")
 args = parser.parse_args()
 
 motion_folder = args.motion_folder

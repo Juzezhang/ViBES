@@ -117,6 +117,15 @@ def parse_args(phase="train"):
                            action="store_true",
                            required=False,
                            help="debug or not")
+        group.add_argument("--visualize",
+                           action="store_true",
+                           required=False,
+                           help="render reconstruction-vs-GT visualization videos")
+        group.add_argument("--max_visualize",
+                           type=int,
+                           required=False,
+                           default=None,
+                           help="cap the number of sequences to visualize")
 
 
     if phase == "demo":
@@ -194,6 +203,8 @@ def parse_args(phase="train"):
         cfg.NUM_NODES = params.num_nodes if params.num_nodes else cfg.NUM_NODES
         cfg.model.params.task = params.task if params.task else cfg.model.params.task
         cfg.DEBUG = not params.nodebug if params.nodebug is not None else cfg.DEBUG
+        cfg.VISUALIZE = bool(getattr(params, "visualize", False))
+        cfg.MAX_VISUALIZE = getattr(params, "max_visualize", None)
 
         # Force no debug in test
         if phase == "test":

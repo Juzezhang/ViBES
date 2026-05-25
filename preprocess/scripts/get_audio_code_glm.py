@@ -2,6 +2,7 @@ import torchaudio
 import torch
 import os
 import numpy as np
+import soundfile as sf
 from os.path import join
 import argparse
 from tqdm import tqdm
@@ -9,14 +10,29 @@ from transformers import WhisperFeatureExtractor, AutoTokenizer
 from speech_tokenizer.modeling_whisper import WhisperVQEncoder
 from pathlib import Path
 
+
+def _load_wav(path):
+    """Load wav using soundfile (avoids torchaudio.load's torchcodec dep on torchaudio>=2.9)."""
+    audio_np, sample_rate = sf.read(path, dtype="float32", always_2d=True)
+    # soundfile returns (samples, channels); convert to (channels, samples) to match torchaudio.
+    audio = torch.from_numpy(audio_np.T.copy())
+    return audio, sample_rate
+
 # Check if CUDA is available
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 # Argument parsing
-parser = argparse.ArgumentParser('exp_motion command line tools')
-parser.add_argument('--wav_folder', type=str, default="/simurgh/u/juze/datasets/TFHP/audios", help="Path to the folder containing .wav files")
-parser.add_argument('--output_dir', type=str, default="/simurgh/u/juze/datasets/TFHP/audios_token_glm",
-                    help="Directory to save the quantized outputs")
+parser = argparse.ArgumentParser(
+    description=(
+        "Tokenize a folder of .wav files into GLM-4-Voice discrete audio tokens (one .npy per .wav). "
+        "Works on any dataset's audio: TFHP <TFHP_ROOT>/audios, BEAT2 <BEAT2_ROOT>/wave16k, "
+        "AMASS_talking <AMASS_TALKING_ROOT>/audios_q, etc. Walks the input folder recursively."
+    ),
+)
+parser.add_argument('--wav_folder', type=str, required=True,
+                    help="[INPUT] Folder of .wav files (walked recursively).")
+parser.add_argument('--output_dir', type=str, required=True,
+                    help="[OUTPUT] Where to write the .npy token arrays (mirrors the input folder structure).")
 args = parser.parse_args()
 
 wav_folder = args.wav_folder
@@ -35,7 +51,7 @@ def extract_speech_token(model: WhisperVQEncoder, feature_extractor: WhisperFeat
             if isinstance(utt, tuple):
                 audio, sample_rate = utt
             else:
-                audio, sample_rate = torchaudio.load(utt)
+                audio, sample_rate = _load_wav(utt)
             audio = audio.cuda()
             if sample_rate != 16000:
                 if sample_rate not in _resample_buffer:
@@ -87,8 +103,10 @@ for root, dirs, files in tqdm(os.walk(wav_folder)):
 
         try:
             wav_path = join(root, wav_file)
-            output_sub_dir = join(output_dir, root.replace(wav_folder + "/", ""))
-            # os.makedirs(output_sub_dir, exist_ok=True)
+            # Compute output path that mirrors input folder structure under output_dir.
+            # os.path.relpath handles both flat (root == wav_folder) and nested layouts.
+            rel = os.path.relpath(root, wav_folder)
+            output_sub_dir = output_dir if rel == "." else join(output_dir, rel)
             output_path = join(output_sub_dir, wav_file.replace(".wav", ".npy"))
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 

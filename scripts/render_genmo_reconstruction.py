@@ -16,6 +16,7 @@ from multimodal_tokenizers.models.build_model import build_model
 from multimodal_tokenizers.utils.load_checkpoint import (
     load_pretrained_vae_body,
     load_pretrained_vae_compositional,
+    load_pretrained_vae_upper,
 )
 from multimodal_tokenizers.utils.rotation_conversions import (
     axis_angle_to_matrix,
@@ -30,6 +31,11 @@ from multimodal_tokenizers.data.mixed_dataset.data_tools import (
     JOINT_MASK_UPPER_6D,
 )
 
+from pytorch3d.structures import Meshes
+from pytorch3d.structures.meshes import join_meshes_as_scene
+from pytorch3d.renderer import TexturesVertex, Materials
+from pytorch3d.utils import ico_sphere
+
 ROOT_DIR = Path(__file__).resolve().parents[1]
 GVHMR_ASSET_DIR = ROOT_DIR / "model_files" / "gvhmr"
 
@@ -39,6 +45,91 @@ from utils.genmo.vis.renderer import Renderer, get_global_cameras_static, get_gr
 from utils.genmo.geo_transform import apply_T_on_points, compute_T_ayfz2ay
 from utils.genmo.camera import create_camera_sensor
 from utils.genmo.smplx_utils import make_smplx
+
+# GENMO 145D joint layout: 21 body joints x 6D rotation = 126D, then betas(10), global_orient(6), local_vel(3)
+# Lower body joint indices (within 21 body joints): 0,1,3,4,6,7,9,10 = 8 joints
+GENMO_LOWER_JOINT_INDICES = [0, 1, 3, 4, 6, 7, 9, 10]
+# Upper body joint indices: 2,5,8,11,12,13,14,15,16,17,18,19,20 = 13 joints
+GENMO_UPPER_JOINT_INDICES = [2, 5, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+
+# Contact joint IDs in the SMPL joint regressor (ankle/foot joints)
+CONTACT_JOINT_IDS = [7, 10, 8, 11]  # L_Ankle, L_Foot, R_Ankle, R_Foot
+CONTACT_VEL_THRESHOLD = 0.15  # m/s
+
+
+def insert_zero_betas(motion_135):
+    """
+    Insert zero betas (10D) at index 126 to convert 135D GenmoFull (no betas) to 145D.
+    135D layout: body_r6d(126) + global_r6d(6) + local_vel(3)
+    145D layout: body_r6d(126) + betas(10) + global_r6d(6) + local_vel(3)
+    """
+    seq_len = motion_135.shape[0]
+    zeros = torch.zeros(seq_len, 10, device=motion_135.device, dtype=motion_135.dtype)
+    return torch.cat([motion_135[:, :126], zeros, motion_135[:, 126:]], dim=-1)
+
+
+def split_genmo_to_lower_upper(motion_145, include_global_orient=False):
+    """
+    Split a full 145D GENMO vector into lower and upper parts.
+    Lower: 8 lower joints x 6D (48D) + betas(10D) [+ global_orient(6D)] + local_vel(3D)
+      - include_global_orient=True:  67D (48+10+6+3)
+      - include_global_orient=False: 61D (48+10+3)
+    Upper (78D): 13 upper joints x 6D
+    """
+    seq_len = motion_145.shape[0]
+    body_r6d = motion_145[:, :126].reshape(seq_len, 21, 6)
+    betas = motion_145[:, 126:136]
+    global_r6d = motion_145[:, 136:142]
+    local_vel = motion_145[:, 142:145]
+
+    lower_joints = body_r6d[:, GENMO_LOWER_JOINT_INDICES].reshape(seq_len, -1)  # (T, 48)
+    upper_joints = body_r6d[:, GENMO_UPPER_JOINT_INDICES].reshape(seq_len, -1)  # (T, 78)
+
+    if include_global_orient:
+        lower = torch.cat([lower_joints, betas, global_r6d, local_vel], dim=-1)  # (T, 67)
+    else:
+        lower = torch.cat([lower_joints, betas, local_vel], dim=-1)  # (T, 61)
+    return lower, upper_joints, global_r6d
+
+
+def merge_lower_upper_to_genmo(lower, upper, global_r6d_gt, include_global_orient=False):
+    """
+    Merge lower and upper back into full 145D GENMO vector.
+    Uses GT global_orient when not included in lower VAE.
+    """
+    seq_len = lower.shape[0]
+    lower_joints = lower[:, :48].reshape(seq_len, 8, 6)
+    betas = lower[:, 48:58]
+
+    if include_global_orient:
+        global_r6d = lower[:, 58:64]
+        local_vel = lower[:, 64:67]
+    else:
+        global_r6d = global_r6d_gt  # Use GT global orient
+        local_vel = lower[:, 58:61]
+
+    upper_joints = upper.reshape(seq_len, 13, 6)
+
+    body_r6d = torch.zeros(seq_len, 21, 6, device=lower.device, dtype=lower.dtype)
+    for i, idx in enumerate(GENMO_LOWER_JOINT_INDICES):
+        body_r6d[:, idx] = lower_joints[:, i]
+    for i, idx in enumerate(GENMO_UPPER_JOINT_INDICES):
+        body_r6d[:, idx] = upper_joints[:, i]
+
+    return torch.cat([body_r6d.reshape(seq_len, 126), betas, global_r6d, local_vel], dim=-1)
+
+
+def compute_contact_labels(joints_3d, fps=30.0, vel_thr=CONTACT_VEL_THRESHOLD):
+    """
+    Compute contact labels for ankle/foot joints based on velocity threshold.
+    joints_3d: (L, J, 3) tensor
+    Returns: (L, len(CONTACT_JOINT_IDS)) boolean tensor
+    """
+    diff = joints_3d[1:] - joints_3d[:-1]
+    velocity = torch.norm(diff, dim=-1) * fps  # (L-1, J)
+    velocity = torch.cat([velocity, velocity[-1:]], dim=0)  # (L, J)
+    contact = velocity[:, CONTACT_JOINT_IDS] < vel_thr  # (L, 4)
+    return contact
 
 
 def decode_genmo_to_smplx(motion_vector):
@@ -195,9 +286,11 @@ def main():
 
     selected_part = cfg.Selected_part
     is_genmo = cfg.DATASET.motion_representation == "genmo" and selected_part == "full_genmo"
-    if not is_genmo and selected_part not in {"compositional", "upper_lower_global", "lower_global"}:
+    is_genmo_lower = cfg.DATASET.get("motion_representation", "") == "genmo" and selected_part == "genmo_lower"
+    genmo_full_include_betas = cfg.DATASET.get("GENMO_FULL_INCLUDE_BETAS", True)
+    if not is_genmo and not is_genmo_lower and selected_part not in {"compositional", "upper_lower_global", "lower_global"}:
         raise ValueError(
-            "render_genmo_reconstruction only supports full_genmo or compositional configs. "
+            "render_genmo_reconstruction only supports full_genmo, genmo_lower, or compositional configs. "
             f"Got Selected_part={selected_part}."
         )
 
@@ -207,8 +300,12 @@ def main():
         cfg.TEST.CHECKPOINTS_FACE = ""
 
     model = build_model(cfg)
-    if is_genmo:
-        load_pretrained_vae_body(cfg, model, None, phase="test")
+    if is_genmo or is_genmo_lower:
+        # Use phase="token" to load from cfg.TEST.CHECKPOINTS_BODY
+        load_pretrained_vae_body(cfg, model, None, phase="token")
+        if is_genmo_lower and hasattr(model, "vae_upper"):
+            # Use phase="token" to load from cfg.TEST.CHECKPOINTS_UPPER
+            load_pretrained_vae_upper(cfg, model, Log, phase="token")
     else:
         load_pretrained_vae_compositional(cfg, model, None, phase="test")
     model = model.to(device)
@@ -249,6 +346,13 @@ def main():
     renderer = Renderer(width, height, device="cuda", faces=faces_smpl, K=K, bin_size=0)
     color = torch.tensor([0.69, 0.39, 0.96]).cuda()
 
+    # Contact visualization resources
+    sphere_mesh = ico_sphere(level=1, device=device)
+    sphere_verts_template = sphere_mesh.verts_list()[0] * 0.05  # radius 0.05m
+    sphere_faces = sphere_mesh.faces_list()[0]
+    contact_color = torch.tensor([1.0, 1.0, 0.0]).to(device)  # yellow
+    faces_t = torch.from_numpy(faces_smpl.astype(np.int64)).to(device)
+
     total_saved = 0
     for split in render_splits:
         if split == "train":
@@ -284,8 +388,52 @@ def main():
 
             if is_genmo:
                 motion = batch["motion_vector"][0].to(device)
-                tokens = model.vae_body.map2index(motion.unsqueeze(0))
-                rec_motion = model.vae_body.decode(tokens.int())[0]
+                # Dataloader provides 145D: body_r6d(126) + betas(126:136)
+                #   + global_r6d(136:142) + local_vel(142:145).
+                # Normalize GT to 145D for rendering if it ever arrives as 135D.
+                if motion.shape[-1] == 135:
+                    motion = insert_zero_betas(motion)
+                # Build the model input. The released GenmoFull model is 135D (no
+                # betas): drop the betas block -> body(126)+global(6)+vel(3). The
+                # 145D variant keeps everything. NOTE: do NOT use motion[:, :135] —
+                # that keeps the betas and drops global_orient/local_vel, corrupting
+                # the reconstructed root orientation and translation.
+                if genmo_full_include_betas:
+                    model_input = motion
+                else:
+                    model_input = torch.cat([motion[:, :126], motion[:, 136:145]], dim=-1)
+                tokens = model.vae_body.map2index(model_input.unsqueeze(0))
+                rec_motion_raw = model.vae_body.decode(tokens.int())[0]
+                # If VAE outputs 135D (no betas), insert zero betas for decoding
+                if rec_motion_raw.shape[-1] == 135:
+                    rec_motion = insert_zero_betas(rec_motion_raw)
+                else:
+                    rec_motion = rec_motion_raw
+                verts_gt, joints_gt, gt_len = genmo_vertices_and_joints(
+                    motion, smplx_model, smplx2smpl, J_regressor, max_seconds, fps
+                )
+                verts_rec, joints_rec, rec_len = genmo_vertices_and_joints(
+                    rec_motion, smplx_model, smplx2smpl, J_regressor, max_seconds, fps
+                )
+            elif is_genmo_lower:
+                motion = batch["motion_vector"][0].to(device)
+                # Check config flags for split dimensions
+                include_go = getattr(cfg.DATASET, 'GENMO_SPLIT_INCLUDE_GLOBAL_ORIENT', False)
+
+                # Split full 145D genmo into lower and upper
+                gt_lower, gt_upper, gt_global_r6d = split_genmo_to_lower_upper(motion, include_global_orient=include_go)
+
+                # Encode/decode lower through vae_body
+                tokens_lower = model.vae_body.map2index(gt_lower.unsqueeze(0))
+                rec_lower_raw = model.vae_body.decode(tokens_lower.int())[0]
+
+                # Encode/decode upper through vae_upper (78D)
+                tokens_upper = model.vae_upper.map2index(gt_upper.unsqueeze(0))
+                rec_upper_raw = model.vae_upper.decode(tokens_upper.int())[0]
+
+                # Merge back into full 145D (uses GT global_orient if not in lower)
+                rec_motion = merge_lower_upper_to_genmo(rec_lower_raw, rec_upper_raw, gt_global_r6d, include_global_orient=include_go)
+
                 verts_gt, joints_gt, gt_len = genmo_vertices_and_joints(
                     motion, smplx_model, smplx2smpl, J_regressor, max_seconds, fps
                 )
@@ -517,17 +665,77 @@ def main():
             verts_gt = verts_gt[:seq_len]
             verts_rec = verts_rec[:seq_len]
             joints_gt = joints_gt[:seq_len]
+            joints_rec = joints_rec[:seq_len]
 
             scale, cx, cz = get_ground_params_from_points(joints_gt[:, 0], verts_gt)
             renderer.set_ground(max(scale, 3) * 1.5, cx, cz)
             cam_R, cam_T, lights = get_global_cameras_static(verts_gt.cpu())
 
+            # Compute contact labels for GT and reconstructed
+            contact_gt = compute_contact_labels(joints_gt, fps=fps)
+            contact_rec = compute_contact_labels(joints_rec, fps=fps)
+
             frames = []
             for i in range(seq_len):
                 with torch.no_grad():
                     cams = renderer.create_camera(cam_R[i], cam_T[i])
-                    img_gt = renderer.render_with_ground(verts_gt[[i]], color[None], cams, lights)
-                    img_rec = renderer.render_with_ground(verts_rec[[i]], color[None], cams, lights)
+
+                    # Build GT mesh with contact spheres
+                    gt_body_mesh = Meshes(
+                        verts=[verts_gt[i]], faces=[faces_t],
+                        textures=TexturesVertex(verts_features=[color.expand(verts_gt.shape[1], -1)])
+                    )
+                    gt_meshes = [gt_body_mesh]
+                    for j_idx, joint_id in enumerate(CONTACT_JOINT_IDS):
+                        if contact_gt[i, j_idx]:
+                            gt_meshes.append(Meshes(
+                                verts=[sphere_verts_template + joints_gt[i, joint_id]],
+                                faces=[sphere_faces],
+                                textures=TexturesVertex(
+                                    verts_features=[contact_color.expand(sphere_verts_template.shape[0], -1)]
+                                )
+                            ))
+
+                    # Build reconstruction mesh with contact spheres
+                    rec_body_mesh = Meshes(
+                        verts=[verts_rec[i]], faces=[faces_t],
+                        textures=TexturesVertex(verts_features=[color.expand(verts_rec.shape[1], -1)])
+                    )
+                    rec_meshes = [rec_body_mesh]
+                    for j_idx, joint_id in enumerate(CONTACT_JOINT_IDS):
+                        if contact_rec[i, j_idx]:
+                            rec_meshes.append(Meshes(
+                                verts=[sphere_verts_template + joints_rec[i, joint_id]],
+                                faces=[sphere_faces],
+                                textures=TexturesVertex(
+                                    verts_features=[contact_color.expand(sphere_verts_template.shape[0], -1)]
+                                )
+                            ))
+
+                    # Render GT scene
+                    gv_gt, gf_gt, gc_gt = renderer.ground_geometry
+                    gt_meshes.append(Meshes(
+                        verts=[gv_gt], faces=[gf_gt],
+                        textures=TexturesVertex(verts_features=[gc_gt[..., :3]])
+                    ))
+                    scene_gt = join_meshes_as_scene(gt_meshes)
+                    img_gt = (renderer.renderer(
+                        scene_gt, cameras=cams, lights=lights,
+                        materials=Materials(device=device, shininess=0)
+                    )[0, ..., :3].cpu().numpy() * 255).astype(np.uint8)
+
+                    # Render reconstruction scene
+                    gv_rec, gf_rec, gc_rec = renderer.ground_geometry
+                    rec_meshes.append(Meshes(
+                        verts=[gv_rec], faces=[gf_rec],
+                        textures=TexturesVertex(verts_features=[gc_rec[..., :3]])
+                    ))
+                    scene_rec = join_meshes_as_scene(rec_meshes)
+                    img_rec = (renderer.renderer(
+                        scene_rec, cameras=cams, lights=lights,
+                        materials=Materials(device=device, shininess=0)
+                    )[0, ..., :3].cpu().numpy() * 255).astype(np.uint8)
+
                     frames.append(np.concatenate([img_gt, img_rec], axis=1))
 
             seq_name = batch["id_name"][0]

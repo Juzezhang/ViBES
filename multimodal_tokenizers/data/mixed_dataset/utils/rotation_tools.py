@@ -23,7 +23,7 @@
 import numpy as np
 
 from torch.nn import functional as F
-from conver_agent.data.mixed_dataset.utils import tgm_conversion as tgm
+from multimodal_tokenizers.data.mixed_dataset.utils import tgm_conversion as tgm
 import torch
 
 def local2global_pose(local_pose, kintree):

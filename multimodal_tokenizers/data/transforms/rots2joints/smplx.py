@@ -18,8 +18,8 @@ import contextlib
 from typing import Optional
 import torch
 from torch import Tensor
-from conver_agent.utils.joints import smplh_to_mmm_scaling_factor, smplh2mmm_indexes, get_root_idx
-from conver_agent.utils.easyconvert import rep_to_rep
+from multimodal_tokenizers.utils.joints import smplh_to_mmm_scaling_factor, smplh2mmm_indexes, get_root_idx
+from multimodal_tokenizers.utils.easyconvert import rep_to_rep
 from .base import Rots2Joints
 
 
@@ -181,7 +181,7 @@ def smplx_to(jointstype, data, trans):
             data[..., 2] = -data[..., 2]
 
     elif jointstype == "smplnh":
-        from conver_agent.utils.joints import smplh2smplnh_indexes
+        from multimodal_tokenizers.utils.joints import smplh2smplnh_indexes
         indexes = smplh2smplnh_indexes
         data = data[..., indexes, :]
     elif jointstype == "smplh":

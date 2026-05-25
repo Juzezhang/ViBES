@@ -12,14 +12,21 @@ from rich.progress import track
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Argument parsing
-parser = argparse.ArgumentParser('exp_motion command line tools')
-parser.add_argument('--root_folder', type=str, default="/simurgh2/datasets/AMASS", help="Path to the folder containing motion files")
-parser.add_argument('--text_folder', type=str, default="/simurgh2/datasets/AMASS/texts", help="Path to the folder containing motion files")
-parser.add_argument('--motion_folder', type=str, default="/simurgh2/datasets/AMASS/amass_data_align_25", help="Path to the folder containing motion files")
-parser.add_argument('--motion_folder_audio_rotation', type=str, default="/simurgh2/datasets/AMASS/amass_data_align_25_audios_rotation", help="Path to the folder containing motion files")
-parser.add_argument('--text_folder_audio', type=str, default="/simurgh2/datasets/AMASS/texts_for_transcripts", help="Path to the folder containing motion files")
-parser.add_argument('--text_label_index_dir', type=str, default="/simurgh2/datasets/AMASS/texts_label_index",
-                    help="Path to the folder containing text label index files")
+parser = argparse.ArgumentParser(
+    description="Convert HumanML3D text annotations into AMASS-talking transcripts aligned with audio.",
+)
+parser.add_argument('--root_folder', type=str, required=True,
+                    help="[INPUT] AMASS_talking root directory (must contain train.txt / val.txt / test.txt).")
+parser.add_argument('--text_folder', type=str, required=True,
+                    help="[INPUT] HumanML3D `texts/` folder with one .txt per clip.")
+parser.add_argument('--motion_folder', type=str, required=True,
+                    help="[INPUT] Processed AMASS motion folder produced by dataset_process_amass.py (e.g. amass_data_align_25).")
+parser.add_argument('--motion_folder_audio_rotation', type=str, required=True,
+                    help="[OUTPUT] Where to write audio-aligned motion sequences with rotation conversion (e.g. amass_data_align_25_audios_rotation).")
+parser.add_argument('--text_folder_audio', type=str, required=True,
+                    help="[OUTPUT] Where to write per-clip transcript files ready for TTS (e.g. texts_for_transcripts).")
+parser.add_argument('--text_label_index_dir', type=str, required=True,
+                    help="[INPUT] Folder of label-index files (the extracted contents of preprocess/texts_label_index.zip).")
 args = parser.parse_args()
 
 text_folder = args.text_folder  

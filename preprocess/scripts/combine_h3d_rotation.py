@@ -15,7 +15,7 @@ import torch
 import smplx
 from models.utils.rotation_conversions import axis_angle_to_6d, axis_angle_to_matrix, rotation_6d_to_axis_angle, axis_angle_to_6d_np, rotation_6d_to_matrix, matrix_to_axis_angle, matrix_to_rotation_6d
 
-from conver_agent.data.mixed_dataset.data_tools import (
+from multimodal_tokenizers.data.mixed_dataset.data_tools import (
     JOINT_MASK_UPPER,
     JOINT_MASK_HANDS,
     JOINT_MASK_LOWER,
@@ -23,7 +23,7 @@ from conver_agent.data.mixed_dataset.data_tools import (
 from utils.motion_process import recover_from_ric
 from models.tokenizers.lom_vq import VQVAEConvZeroDSUS_PaperVersion, VQVAEConvZeroDSUS1_PaperVersion, VAEConvZero
 from models.tokenizers.mgpt_vq import VQVae
-import conver_agent.render.matplot.plot_3d_global as plot_3d
+import multimodal_tokenizers.render.matplot.plot_3d_global as plot_3d
 import moviepy.editor as mp
 
 
@@ -126,9 +126,9 @@ def load_rotation_data(rotation_path):
 def main():
     parser = argparse.ArgumentParser(description='Test GLM-4-Voice checkpoint')
     parser.add_argument('--checkpoint', type=str, 
-                       default="/scr/juze/experiments/glm4voice_conversational_mot_layernum_5_modalitynum_6_beat2_body_only_v1/checkpoint-514000",
+                       default="/path/to/experiments/glm4voice_conversational_mot_layernum_5_modalitynum_6_beat2_body_only_v1/checkpoint-514000",
                        help='Path to the trained checkpoint')
-    parser.add_argument('--output_dir', type=str, default="/scr/juze/datasets/BEAT2/beat_english_v2.0.0/new_joints_25fps_reconstructed_hybrik", 
+    parser.add_argument('--output_dir', type=str, default="/path/to/BEAT2/beat_english_v2.0.0/new_joints_25fps_reconstructed_hybrik", 
                        help='Output directory')
     parser.add_argument('--device', type=str, default="cuda",
                        help='Device: cuda or cpu')
@@ -155,12 +155,12 @@ def main():
         h3d_feat_index_lower.extend(range( 3 * lower_idx_with_root[i] + 193, 3 * lower_idx_with_root[i] + 3 +  193))
     h3d_feat_index_lower.extend(range(259, 263))
 
-    joints_data = np.load("/scr/juze/datasets/BEAT2/beat_english_v2.0.0/new_joints_25fps/2_scott_0_26_26.npy")
+    joints_data = np.load("/path/to/BEAT2/beat_english_v2.0.0/new_joints_25fps/2_scott_0_26_26.npy")
     joints_data = torch.tensor(joints_data, device=device).unsqueeze(0)
 
 
-    # h3d_tokens = np.load("/scr/juze/datasets/BEAT2/beat_english_v2.0.0/TOKENS_AGENT_25_H3D_LOWER/2_scott_0_26_26.npy")
-    h3d_tokens = np.load("/scr/juze/datasets/BEAT2/beat_english_v2.0.0/TOKENS_AGENT_25_H3D_LOWER/2_scott_0_26_26.npy")
+    # h3d_tokens = np.load("/path/to/BEAT2/beat_english_v2.0.0/TOKENS_AGENT_25_H3D_LOWER/2_scott_0_26_26.npy")
+    h3d_tokens = np.load("/path/to/BEAT2/beat_english_v2.0.0/TOKENS_AGENT_25_H3D_LOWER/2_scott_0_26_26.npy")
     h3d_tokens = h3d_tokens[:, :100]
 
 
@@ -179,8 +179,8 @@ def main():
                 norm=None,
                 activation="relu")
 
-    # checkpoint_lower = torch.load('/simurgh/u/juze/code/MotionGPT/checkpoints/MotionGPT-base/motiongpt_s3_h3d.tar', map_location="cpu", weights_only=False)
-    checkpoint_lower = torch.load('/simurgh/u/juze/code/MotionGPT/experiments/mgpt/VQVAE_HumanML3D_Beat2/checkpoints/epoch=9069.ckpt', map_location="cpu", weights_only=False)
+    # checkpoint_lower = torch.load('/path/to/MotionGPT/checkpoints/MotionGPT-base/motiongpt_s3_h3d.tar', map_location="cpu", weights_only=False)
+    checkpoint_lower = torch.load('/path/to/MotionGPT/experiments/mgpt/VQVAE_HumanML3D_Beat2/checkpoints/epoch=9069.ckpt', map_location="cpu", weights_only=False)
 
 
     # Extract encoder/decoder
@@ -200,7 +200,7 @@ def main():
     lower_tokens = torch.tensor(h3d_tokens, device=device).unsqueeze(0)
     rec_lower_h3d = vae_lower.decode(lower_tokens.int())
 
-    dis_data_root = '/simurgh/u/juze/code/MotionGPT/deps/t2m/t2m/t2m/VQVAEV3_CB1024_CMT_H1024_NRES3/meta'
+    dis_data_root = '/path/to/MotionGPT/deps/t2m/t2m/t2m/VQVAEV3_CB1024_CMT_H1024_NRES3/meta'
     mean = np.load(os.path.join(dis_data_root, "mean.npy"))
     std = np.load(os.path.join(dis_data_root, "std.npy"))
     mean = mean[h3d_feat_index_lower]
@@ -212,7 +212,7 @@ def main():
     rec_lower_h3d = (rec_lower_h3d * std) + mean
     # h3d_joints = recover_from_ric(rec_lower_h3d, 22)[0]
 
-    feat_data = np.load("/scr/juze/datasets/BEAT2/beat_english_v2.0.0/new_joint_vecs_25fps/2_scott_0_26_26.npy")
+    feat_data = np.load("/path/to/BEAT2/beat_english_v2.0.0/new_joint_vecs_25fps/2_scott_0_26_26.npy")
     feat_data = feat_data[:1000, h3d_feat_index_lower]
     feat_data = torch.tensor(feat_data, device=device).unsqueeze(0)
 
@@ -231,7 +231,7 @@ def main():
     out_video.write_videofile(output_gif_path.replace('.gif', '.mp4'))
 
 
-    pose_data = np.load("/scr/juze/datasets/BEAT2/beat_english_v2.0.0/smplxflame_25/2_scott_0_26_26.npz", allow_pickle=True)['poses']
+    pose_data = np.load("/path/to/BEAT2/beat_english_v2.0.0/smplxflame_25/2_scott_0_26_26.npz", allow_pickle=True)['poses']
     n_pose_data = pose_data.shape[0]
     n_joints_data = joints_data.shape[0]
     tar_pose_upper = pose_data[:, JOINT_MASK_UPPER.astype(bool)].reshape(n_pose_data, 13, 3)
@@ -298,14 +298,14 @@ def main():
 
 
     # # Load H3D data from pkl files (pose and shape separated)
-    # pkl_dir = "/scr/juze/datasets/BEAT2/beat_english_v2.0.0/new_joints_25fps_reconstructed/10_kieks_0_10_10/"
+    # pkl_dir = "/path/to/BEAT2/beat_english_v2.0.0/new_joints_25fps_reconstructed/10_kieks_0_10_10/"
     # pose_data, shape_data = load_h3d_data(pkl_dir)
     
     # if pose_data is None or shape_data is None:
     #     return
     
     # # Load rotation data from npz file
-    # rotation_path = "/scr/juze/datasets/BEAT2/beat_english_v2.0.0/smplxflame_25/10_kieks_0_10_10.npz"
+    # rotation_path = "/path/to/BEAT2/beat_english_v2.0.0/smplxflame_25/10_kieks_0_10_10.npz"
     # rotation_array = load_rotation_data(rotation_path)
     
     # # Frame alignment check - use pose_data as reference
@@ -350,7 +350,7 @@ def main():
     # print(f"Found {len(pkl_files)} .pkl files")
     
     # # Suggest alternative path
-    # alternative_path = "/scr/juze/datasets/BEAT2/beat_english_v2.0.0/joints_25fps/10_kieks_0_10_10.npy"
+    # alternative_path = "/path/to/BEAT2/beat_english_v2.0.0/joints_25fps/10_kieks_0_10_10.npy"
     # if os.path.exists(alternative_path):
     #     print(f"\nAlternative: Use the .npy file at:")
     #     print(f"{alternative_path}")

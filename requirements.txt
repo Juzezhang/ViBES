@@ -2,6 +2,10 @@
 # Note: PyTorch and PyTorch3D are installed separately:
 # - PyTorch: conda install pytorch==2.1.0 torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
 # - PyTorch3D: pip install "git+https://github.com/facebookresearch/pytorch3d.git@stable"
+#     IMPORTANT: build on a machine that has a GPU + nvcc, with FORCE_CUDA=1
+#     (e.g. FORCE_CUDA=1 TORCH_CUDA_ARCH_LIST="9.0" pip install --no-build-isolation ...).
+#     A CPU-only build silently omits CUDA kernels and rendering later fails with
+#     "Not compiled with GPU support" at rasterize_meshes.
 # - NumPy: pip install numpy==1.26.4 (after PyTorch to avoid conflicts)
 # - Flash Attention: pip install flash-attn --no-build-isolation (after PyTorch)
 
@@ -39,7 +43,15 @@ pyrender==0.1.45
 opencv-python==4.11.0.86
 
 # Video processing
-av==14.3.0
+av==14.2.0
+ffmpeg-python==0.2.0          # genmo reconstruction rendering (scripts/render_genmo_reconstruction.py)
+
+# Dataset preprocessing (TFHP LMDB extraction + Whisper transcription)
+lmdb==2.2.0
+faster-whisper==1.2.1
+# NOTE: faster-whisper pulls ctranslate2, whose bundled CUDA kernels can fail on
+# newer GPUs/drivers with "cudaErrorUnsupportedPtxVersion". If you hit that, run
+# get_transcript_TFHP.py with --whisper_device cpu, or downgrade ctranslate2 (<4.5).
 
 # Utilities
 tqdm==4.67.1
@@ -47,7 +59,11 @@ rich==14.0.0
 wandb==0.19.10
 
 # Optional: Install manually if needed
-# chumpy: pip install chumpy-fork (for newer Python versions) or pip install chumpy==0.70 --no-build-isolation
+# chumpy: pip install chumpy==0.70 --no-build-isolation
+#   With numpy>=1.24, chumpy's __init__.py imports removed aliases (np.bool, np.int, ...).
+#   Patch it once after install:
+#     sed -i 's/from numpy import bool, int, float, complex, object, unicode, str, nan, inf/from numpy import nan, inf/' \
+#       $(python -c "import chumpy,os;print(os.path.dirname(chumpy.__file__))")/__init__.py
 # flash-attn: pip install flash-attn --no-build-isolation (requires PyTorch installed first)
 
 hyperpyyaml

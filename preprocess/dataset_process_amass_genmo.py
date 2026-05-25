@@ -22,6 +22,7 @@ Coordinate System Conversion:
 
 import argparse
 import os
+import sys
 import zipfile
 from pathlib import Path
 
@@ -29,6 +30,10 @@ import numpy as np
 import pandas as pd
 import torch
 from tqdm import tqdm
+
+# Make `utils/` (next to this file) importable regardless of how the script is
+# launched (`python preprocess/...py` or `python -m preprocess....`).
+sys.path.append(str(Path(__file__).parent))
 
 from utils.rotation_conversions import (
     axis_angle_to_matrix,
@@ -126,6 +131,14 @@ def get_local_transl_vel(transl, global_orient):
 # AMASS -> GENMO conversion
 # =============================================================================
 
+def get_fps(data, default=30.0):
+    """Robust FPS detection for different AMASS versions."""
+    for fps_key in ["mocap_frame_rate", "mocap_framerate", "frame_rate"]:
+        if fps_key in data:
+            return float(data[fps_key])
+    return default
+
+
 def validate_smplx_file(data):
     """Validate that the file is a proper SMPL-X file."""
     required_keys = ['poses', 'trans', 'betas']
@@ -192,7 +205,7 @@ def convert_amass_to_genmo(data, fps_override=None):
     betas_t = torch.from_numpy(betas.astype(np.float32))
     motion_vector = torch.cat([body_pose_r6d, betas_t, global_orient_r6d, local_transl_vel], dim=-1)
 
-    fps = float(fps_override) if fps_override is not None else float(data.get('mocap_frame_rate', 30.0))
+    fps = float(fps_override) if fps_override is not None else get_fps(data)
     gender = str(data['gender']) if 'gender' in data else 'neutral'
 
     return {
@@ -217,14 +230,14 @@ def parse_arguments():
         "--dataset_path_original",
         type=str,
         required=False,
-        default="/simurgh2/datasets/AMASS_original_smplx",
+        default="/path/to/AMASS_original_smplx",
         help="Path to original AMASS dataset",
     )
     parser.add_argument(
         "--dataset_path_processed",
         type=str,
         required=False,
-        default="/simurgh2/datasets/AMASS",
+        default="/path/to/AMASS",
         help="Path to processed AMASS dataset root",
     )
     parser.add_argument(
@@ -333,8 +346,11 @@ def collect_and_filter_motion_files(amass_data_directory, humanml3d_mapping, deb
         model_type = motion_data['surface_model_type'].item()
         if model_type not in {'smplx', 'smplx_locked_head'}:
             continue
-        if 'mocap_frame_rate' not in motion_data:
+
+        # Robust FPS check
+        if not any(k in motion_data for k in ["mocap_frame_rate", "mocap_framerate", "frame_rate"]):
             continue
+
         valid_motion_files.append(motion_file)
 
     return valid_motion_files
@@ -345,7 +361,7 @@ def resample_and_trim(motion_data, motion_file_path, start_frame, end_frame, tar
     Downsample to target_fps and trim by (start_frame, end_frame) after
     converting index FPS to effective FPS.
     """
-    original_fps = float(motion_data['mocap_frame_rate'])
+    original_fps = get_fps(motion_data)
     downsample_factor = max(1, int(original_fps / target_fps))
 
     pose_data = motion_data['poses'][::downsample_factor, ...]

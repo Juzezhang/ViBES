@@ -8,16 +8,16 @@ import torch
 from os.path import join, exists
 import os
 import argparse
-from conver_agent.utils.renderer_utils import RenderMesh
+from multimodal_tokenizers.utils.renderer_utils import RenderMesh
 import matplotlib
 import matplotlib.pyplot as plt
-from conver_agent.utils.utils_videos import write_video
+from multimodal_tokenizers.utils.utils_videos import write_video
 import cv2
 matplotlib.use('Agg')
 from tqdm import tqdm
-from conver_agent.utils.rotation_conversions import rotation_6d_to_axis_angle, axis_angle_to_6d, axis_angle_to_6d_np
+from multimodal_tokenizers.utils.rotation_conversions import rotation_6d_to_axis_angle, axis_angle_to_6d, axis_angle_to_6d_np
 from transformers import AutoTokenizer, WhisperFeatureExtractor, AutoModel
-from conver_agent.archs.lom_vq import VQVAEConvZeroDSUS_PaperVersion, VQVAEConvZeroDSUS1_PaperVersion
+from multimodal_tokenizers.archs.lom_vq import VQVAEConvZeroDSUS_PaperVersion, VQVAEConvZeroDSUS1_PaperVersion
 import uuid
 from transformers.generation.streamers import BaseStreamer
 import sys
@@ -137,11 +137,11 @@ def load_speaking_track_segments(transcript_dir, video_id):
 
 
 # ---------------------- Configurable Dataset and Model Paths ----------------------
-FLAME_COEFFS_DIR = "/simurgh/group/juze/datasets/YouTube_Talking/FLAME_coeffs"
-FACE_CODE_DIR = "/simurgh/group/juze/datasets/YouTube_Talking/TOKENS_DS4_512_512_DS1_wo_meshloss"
-VIDEO_DIR = "/simurgh/group/juze/datasets/YouTube_Talking/video_20241226"
-TRANSCRIPT_DIR = "/simurgh/group/juze/datasets/YouTube_Talking/transcript"
-AUDIO_CODE_DIR = "/simurgh/group/juze/datasets/YouTube_Talking/audios_token_glm"
+FLAME_COEFFS_DIR = "/path/to/YouTube_Talking/FLAME_coeffs"
+FACE_CODE_DIR = "/path/to/YouTube_Talking/TOKENS_DS4_512_512_DS1_wo_meshloss"
+VIDEO_DIR = "/path/to/YouTube_Talking/video_20241226"
+TRANSCRIPT_DIR = "/path/to/YouTube_Talking/transcript"
+AUDIO_CODE_DIR = "/path/to/YouTube_Talking/audios_token_glm"
 MODEL_DIR = "./model_files/FLAME2020/"
 OUTPUT_DIR = "./output_videos"
 
@@ -225,7 +225,7 @@ face_token_end_frame = int(end_time * 25)
 face_code_path = join(FACE_CODE_DIR, video_name.replace(".mp4", ".npy"))
 face_tokens = np.load(face_code_path)[:, face_token_start_frame:face_token_end_frame]
 
-checkpoint = torch.load('/simurgh/u/juze/code/conversational_agent/experiments/conversational_agent/VQVAE_Mixed_Face_Only_512_DS1_Dim_512_wo_meshloss/checkpoints/epoch=79.ckpt', map_location="cpu", weights_only=False)
+checkpoint = torch.load('/path/to/conversational_agent/experiments/conversational_agent/VQVAE_Mixed_Face_Only_512_DS1_Dim_512_wo_meshloss/checkpoints/epoch=79.ckpt', map_location="cpu", weights_only=False)
 state_dict = checkpoint['state_dict']  # Get only the state_dict
 # Create new state dict with modified keys
 state_dict_face = {}

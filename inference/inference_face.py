@@ -51,7 +51,7 @@ if ROOT_DIR in sys.path:
 sys.path.insert(0, ROOT_DIR)
 
 # Add conversational_agent directory to sys.path for conver_agent imports
-# This enables imports like: from conver_agent.archs.lom_vq import ...
+# This enables imports like: from multimodal_tokenizers.archs.lom_vq import ...
 # This is needed when using conda activate conver_agent environment
 # Path resolution priority:
 #   1) CONVERSATIONAL_AGENT_DIR environment variable (if set)

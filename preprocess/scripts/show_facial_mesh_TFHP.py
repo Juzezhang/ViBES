@@ -6,15 +6,15 @@ import torch
 from os.path import join, exists
 import os
 import argparse
-from conver_agent.utils.renderer_utils import RenderMesh
+from multimodal_tokenizers.utils.renderer_utils import RenderMesh
 import matplotlib
 import matplotlib.pyplot as plt
 import torchaudio
-from conver_agent.utils.utils_videos import write_video
+from multimodal_tokenizers.utils.utils_videos import write_video
 import cv2
 matplotlib.use('Agg')
 from tqdm import tqdm
-from conver_agent.utils.rotation_conversions import rotation_6d_to_axis_angle, axis_angle_to_6d, axis_angle_to_6d_np
+from multimodal_tokenizers.utils.rotation_conversions import rotation_6d_to_axis_angle, axis_angle_to_6d, axis_angle_to_6d_np
 def save_obj(verts, faces, path):
     mesh = trimesh.Trimesh(vertices=verts[0].numpy(), faces=faces)
     mesh.export(path)
@@ -46,7 +46,7 @@ args = parser.parse_args()
 
 
 # LMDB 路径是文件夹，不是 .mdb 文件本身
-lmdb_path = "/simurgh/u/juze/code/conversational_agent/datasets/TFHP/HDTF_TFHP-lmdb"
+lmdb_path = "/path/to/conversational_agent/datasets/TFHP/HDTF_TFHP-lmdb"
 
 # 打开 LMDB
 env = lmdb.open(lmdb_path, readonly=True, lock=False, readahead=False, meminit=False)
@@ -96,7 +96,7 @@ with env.begin() as txn:
         print("Audio shape:", audio.shape)
 
 
-video_path = f"/simurgh/u/juze/datasets/TFHP/data/{video_name}"
+video_path = f"/path/to/TFHP/data/{video_name}"
 
 cap = cv2.VideoCapture(video_path)
 
@@ -107,15 +107,15 @@ cap = cv2.VideoCapture(video_path)
 #     print(f"Adjusted batch size to match total frames: {batch_size}")
 
 # # Construct the paths using the variables
-# # flame_path = f"/simurgh/group/yuheng/CANDOR_spectre_mica/FLAME_coeffs/{seq_name}/{video_name}.npz"
-# flame_path = f"/simurgh/group/yuheng/CANDOR_spectre_mica/FLAME_coeffs/{seq_name}/{video_name}.npz"
-# audio_path = f"/simurgh/group/yuheng/CANDOR_processed/{seq_name}/{video_name}.mp3"
-# # image_folder = f"/simurgh/group/yuheng/CANDOR_spectre_mica/SPECTRE_coeffs/{seq_name}/{video_name}"
-# video_path = f"/simurgh/group/yuheng/CANDOR_processed/{seq_name}/{video_name}.mp4"
+# # flame_path = f"/path/to/CANDOR_spectre_mica/FLAME_coeffs/{seq_name}/{video_name}.npz"
+# flame_path = f"/path/to/CANDOR_spectre_mica/FLAME_coeffs/{seq_name}/{video_name}.npz"
+# audio_path = f"/path/to/CANDOR_processed/{seq_name}/{video_name}.mp3"
+# # image_folder = f"/path/to/CANDOR_spectre_mica/SPECTRE_coeffs/{seq_name}/{video_name}"
+# video_path = f"/path/to/CANDOR_processed/{seq_name}/{video_name}.mp4"
 
 # cap = cv2.VideoCapture(video_path)
 # # Alternate path example (commented out)
-# # flame_path = f"/simurgh/group/yuheng/CANDOR_spectre_mica/SPECTRE_coeffs/230a227f-e1e3-46ef-8817-37912ba9f87a/5c75471e5eb59f000131c7a4.npz"
+# # flame_path = f"/path/to/CANDOR_spectre_mica/SPECTRE_coeffs/230a227f-e1e3-46ef-8817-37912ba9f87a/5c75471e5eb59f000131c7a4.npz"
 
 # print(f"Processing sequence: {seq_name}")
 # print(f"Video: {video_name}")

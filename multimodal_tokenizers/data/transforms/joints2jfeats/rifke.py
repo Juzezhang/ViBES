@@ -20,7 +20,7 @@ import torch
 from einops import rearrange
 from torch import Tensor
 from .tools import get_forward_direction, get_floor, gaussian_filter1d  # noqa
-from conver_agent.utils.geometry_tools import matrix_of_angles
+from multimodal_tokenizers.utils.geometry_tools import matrix_of_angles
 from .base import Joints2Jfeats
 
 
