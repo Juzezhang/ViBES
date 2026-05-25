@@ -6,15 +6,15 @@ import torch
 from os.path import join, exists
 import os
 import argparse
-from conver_agent.utils.renderer_utils import RenderMesh
+from multimodal_tokenizers.utils.renderer_utils import RenderMesh
 import matplotlib
 import matplotlib.pyplot as plt
 import torchaudio
-from conver_agent.utils.utils_videos import write_video
+from multimodal_tokenizers.utils.utils_videos import write_video
 import cv2
 matplotlib.use('Agg')
 from tqdm import tqdm
-from conver_agent.utils.rotation_conversions import rotation_6d_to_axis_angle, axis_angle_to_6d, axis_angle_to_6d_np
+from multimodal_tokenizers.utils.rotation_conversions import rotation_6d_to_axis_angle, axis_angle_to_6d, axis_angle_to_6d_np
 
 def save_obj(verts, faces, path):
     """Save mesh vertices and faces to an OBJ file."""
@@ -24,13 +24,13 @@ def save_obj(verts, faces, path):
 import soundfile as sf
 
 # ---------------------- Configurable Dataset and Model Paths ----------------------
-FLAME_COEFFS_DIR = "/simurgh/group/juze/datasets/YouTube_Talking/FLAME_coeffs_25"
-# FLAME_COEFFS_DIR = "/simurgh/group/yuheng/youtube_spectre_mica/Talk_video_summary_English_20241226/FLAME_coeffs_1"
-# FLAME_COEFFS_DIR = "/simurgh/group/yuheng/youtube_spectre_mica/Talk_video_summary_English_20241226/FLAME_coeffs_1kfrm_0814"
-VIDEO_DIR = "/simurgh/group/juze/datasets/YouTube_Talking/video_20241226"
-AUDIO_DIR = "/simurgh/group/juze/datasets/YouTube_Talking/audios_original"
+FLAME_COEFFS_DIR = "/path/to/YouTube_Talking/FLAME_coeffs_25"
+# FLAME_COEFFS_DIR = "/path/to/youtube_spectre_mica/Talk_video_summary_English_20241226/FLAME_coeffs_1"
+# FLAME_COEFFS_DIR = "/path/to/youtube_spectre_mica/Talk_video_summary_English_20241226/FLAME_coeffs_1kfrm_0814"
+VIDEO_DIR = "/path/to/YouTube_Talking/video_20241226"
+AUDIO_DIR = "/path/to/YouTube_Talking/audios_original"
 MODEL_DIR = "./model_files/FLAME2020/"
-OUTPUT_DIR = "/simurgh/group/juze/datasets/YouTube_Talking/Reconstructed_videos_first1k"
+OUTPUT_DIR = "/path/to/YouTube_Talking/Reconstructed_videos_first1k"
 # OUTPUT_DIR = "./output_videos_testset"
 
 # ---------------------- Argument Parsing ----------------------

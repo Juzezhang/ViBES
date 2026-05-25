@@ -1,0 +1,2 @@
+/path/to/BEAT2/beat_english_v2.0.0/preprocess_hf_beat2_dataset_body_upper_lower_genmo_train_v1/tokenized_dataset
+/path/to/AMASS_talking/preprocess_hf_amass_dataset_body_upper_lower_genmo_train_v1/tokenized_dataset

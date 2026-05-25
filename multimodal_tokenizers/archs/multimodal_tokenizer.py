@@ -13,7 +13,7 @@ from reference_project.GLM_4_Voice.speech_tokenizer.modeling_whisper import Whis
 from reference_project.GLM_4_Voice.speech_tokenizer.utils import extract_speech_token, load_quantize_encoder
 
 # Import face VQ-VAE model
-from conver_agent.archs.lom_vq import VQVAEConvZeroDSUS_PaperVersion
+from multimodal_tokenizers.archs.lom_vq import VQVAEConvZeroDSUS_PaperVersion
 
 
 class MultimodalTokenizer:

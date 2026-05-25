@@ -20,7 +20,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import utilities from the project
-from conver_agent.data.utils import conversation_collate, add_system_template_and_chunk
+from multimodal_tokenizers.data.utils import conversation_collate, add_system_template_and_chunk
 
 def main():
     parser = argparse.ArgumentParser(description="Load and process CANDOR dataset with system template")

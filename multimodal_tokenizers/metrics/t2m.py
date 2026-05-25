@@ -5,7 +5,7 @@ from torch import Tensor
 from torchmetrics import Metric
 from torchmetrics.functional import pairwise_euclidean_distance
 from .utils import *
-from conver_agent.config import instantiate_from_config
+from multimodal_tokenizers.config import instantiate_from_config
 
 class TM2TMetrics(Metric):
     def __init__(self,

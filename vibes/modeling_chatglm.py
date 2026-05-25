@@ -2177,6 +2177,26 @@ def extract_position_indices_from_rotary_computation(rotary_embedding_module, mo
     # Find consecutive groups of modality 1 positions (cycles)
     mod1_groups = _find_consecutive_groups(mod1_positions)
 
+    # Handle style_control face tokens that appear before the first audio cycle
+    if 2 in modality_positions and len(mod1_groups) > 0:
+        first_audio_pos = mod1_groups[0][0].item()
+        pre_audio_face = [p for p in modality_positions[2].tolist() if p < first_audio_pos]
+
+        if pre_audio_face:
+            before_idx = None
+            after_idx = None
+            for p in sorted(pos_to_rope_idx.keys()):
+                if p < pre_audio_face[0]:
+                    before_idx = pos_to_rope_idx[p]
+                if p > pre_audio_face[-1] and after_idx is None:
+                    after_idx = pos_to_rope_idx[p]
+
+            if before_idx is not None and after_idx is not None:
+                n = len(pre_audio_face)
+                for i, pos in enumerate(pre_audio_face):
+                    alpha = (i + 1) / (n + 1)
+                    position_indices[pos] = before_idx + alpha * (after_idx - before_idx)
+
     for group_idx, mod1_group in enumerate(mod1_groups):
         # Get timing information for this mod1 cycle
         first_mod1_pos = mod1_group[0].item()
@@ -3308,12 +3328,12 @@ class ModalityUntiedSelfAttention(torch.nn.Module):
             )
 
             key_layer_list_restored = self.batch_processor.restore_to_original_feature(
-                [cache_k_1, key_layer], 
+                [cache_k_1, key_layer],
                 original_input_shape=(batch_size, n_heads, seq_length_original),  # batch_size, n_heads, seq_length
                 modality_masks=expert_masks
             )
             value_layer_list_restored = self.batch_processor.restore_to_original_feature(
-                [cache_v_1, value_layer], 
+                [cache_v_1, value_layer],
                 original_input_shape=(batch_size, n_heads, seq_length_original),  # batch_size, n_heads, seq_length
                 modality_masks=expert_masks
             )
@@ -6009,8 +6029,9 @@ class ChatGLMForConditionalGenerationMotExpertNum2(ChatGLMPreTrainedModel, Gener
                 audio_groups.append(current_group)
                 current_group = []
 
-        # Handle the last group
-        if current_group:
+        # Handle the last group — only keep if complete (26 tokens)
+        # Incomplete groups mean generation ended mid-group; no motion should follow.
+        if current_group and len(current_group) == 26:
             audio_groups.append(current_group)
 
         print(f"Audio tokens divided into {len(audio_groups)} groups:")
@@ -6109,8 +6130,9 @@ class ChatGLMForConditionalGenerationMotExpertNum2(ChatGLMPreTrainedModel, Gener
                 audio_groups.append(current_group)
                 current_group = []
 
-        # Handle the last group
-        if current_group:
+        # Handle the last group — only keep if complete (26 tokens)
+        # Incomplete groups mean generation ended mid-group; no motion should follow.
+        if current_group and len(current_group) == 26:
             audio_groups.append(current_group)
 
         print(f"Audio tokens divided into {len(audio_groups)} groups:")
@@ -6171,6 +6193,97 @@ class ChatGLMForConditionalGenerationMotExpertNum2(ChatGLMPreTrainedModel, Gener
         print(f"Successfully added motion tokens, {total_motion_tokens} motion tokens, final length: {new_output_ids.shape[1]}")
         return new_output_ids, new_modality_masks
 
+    def add_upper_lower_genmo_tokens_to_output(self, output_ids, output_modality_masks):
+        """Add upper + lower_genmo tokens. 27 per group: 1 bom + 13 upper + 13 lower. No hand."""
+        print("\n=== Adding Upper+LowerGenmo Tokens ===")
+        TOKENS_PER_GROUP = 27
+        audio_positions = [i for i, t in enumerate(output_ids[0]) if 152353 <= t <= 168735]
+        print(f"Found {len(audio_positions)} audio tokens")
+        if not audio_positions:
+            return output_ids, output_modality_masks
+        audio_groups, cur = [], []
+        for i, pos in enumerate(audio_positions):
+            cur.append(pos)
+            if len(cur) == 26 or (i+1 < len(audio_positions) and audio_positions[i+1] != pos+1):
+                audio_groups.append(cur); cur = []
+        if cur: audio_groups.append(cur)
+        total = len(audio_groups) * TOKENS_PER_GROUP
+        new_len = output_ids.shape[1] + total
+        print(f"Will add {total} tokens ({TOKENS_PER_GROUP}/group), new length: {new_len}")
+        device = output_ids.device
+        new_ids = 168736 * torch.ones(output_ids.shape[0], new_len, dtype=output_ids.dtype, device=device)
+        new_masks = torch.zeros(output_modality_masks.shape[0], output_ids.shape[0], new_len, dtype=output_modality_masks.dtype, device=device)
+        cp, np_ = 0, 0
+        for grp in audio_groups:
+            sl = grp[0] - cp
+            if sl > 0:
+                new_ids[:, np_:np_+sl] = output_ids[:, cp:grp[0]]
+                new_masks[:, :, np_:np_+sl] = output_modality_masks[:, :, cp:grp[0]]
+                np_ += sl
+            al = len(grp)
+            new_ids[:, np_:np_+al] = output_ids[:, grp[0]:grp[-1]+1]
+            new_masks[:, :, np_:np_+al] = output_modality_masks[:, :, grp[0]:grp[-1]+1]
+            np_ += al
+            mt = torch.zeros(1, TOKENS_PER_GROUP, dtype=output_ids.dtype, device=device)
+            mt[0, 0] = 1280
+            new_ids[:, np_:np_+TOKENS_PER_GROUP] = mt
+            new_masks[0, :, np_:np_+TOKENS_PER_GROUP] = False
+            new_masks[1, :, np_:np_+TOKENS_PER_GROUP] = False
+            new_masks[2, :, np_:np_+TOKENS_PER_GROUP] = True
+            np_ += TOKENS_PER_GROUP
+            cp = grp[-1] + 1
+        if cp < output_ids.shape[1]:
+            rl = output_ids.shape[1] - cp
+            new_ids[:, np_:np_+rl] = output_ids[:, cp:]
+            new_masks[:, :, np_:np_+rl] = output_modality_masks[:, :, cp:]
+        print(f"Successfully added upper+lower_genmo tokens, final length: {new_ids.shape[1]}")
+        return new_ids, new_masks
+
+    def add_fullbody_genmo_tokens_to_output(self, output_ids, output_modality_masks):
+        """Add fullbody_genmo tokens (as upper). 14 per group: 1 bom + 13 fullbody."""
+        print("\n=== Adding FullbodyGenmo Tokens ===")
+        TOKENS_PER_GROUP = 14
+        audio_positions = [i for i, t in enumerate(output_ids[0]) if 152353 <= t <= 168735]
+        print(f"Found {len(audio_positions)} audio tokens")
+        if not audio_positions:
+            return output_ids, output_modality_masks
+        audio_groups, cur = [], []
+        for i, pos in enumerate(audio_positions):
+            cur.append(pos)
+            if len(cur) == 26 or (i+1 < len(audio_positions) and audio_positions[i+1] != pos+1):
+                audio_groups.append(cur); cur = []
+        if cur: audio_groups.append(cur)
+        total = len(audio_groups) * TOKENS_PER_GROUP
+        new_len = output_ids.shape[1] + total
+        print(f"Will add {total} tokens ({TOKENS_PER_GROUP}/group), new length: {new_len}")
+        device = output_ids.device
+        new_ids = 168736 * torch.ones(output_ids.shape[0], new_len, dtype=output_ids.dtype, device=device)
+        new_masks = torch.zeros(output_modality_masks.shape[0], output_ids.shape[0], new_len, dtype=output_modality_masks.dtype, device=device)
+        cp, np_ = 0, 0
+        for grp in audio_groups:
+            sl = grp[0] - cp
+            if sl > 0:
+                new_ids[:, np_:np_+sl] = output_ids[:, cp:grp[0]]
+                new_masks[:, :, np_:np_+sl] = output_modality_masks[:, :, cp:grp[0]]
+                np_ += sl
+            al = len(grp)
+            new_ids[:, np_:np_+al] = output_ids[:, grp[0]:grp[-1]+1]
+            new_masks[:, :, np_:np_+al] = output_modality_masks[:, :, grp[0]:grp[-1]+1]
+            np_ += al
+            mt = torch.zeros(1, TOKENS_PER_GROUP, dtype=output_ids.dtype, device=device)
+            mt[0, 0] = 1280
+            new_ids[:, np_:np_+TOKENS_PER_GROUP] = mt
+            new_masks[0, :, np_:np_+TOKENS_PER_GROUP] = False
+            new_masks[1, :, np_:np_+TOKENS_PER_GROUP] = False
+            new_masks[2, :, np_:np_+TOKENS_PER_GROUP] = True
+            np_ += TOKENS_PER_GROUP
+            cp = grp[-1] + 1
+        if cp < output_ids.shape[1]:
+            rl = output_ids.shape[1] - cp
+            new_ids[:, np_:np_+rl] = output_ids[:, cp:]
+            new_masks[:, :, np_:np_+rl] = output_modality_masks[:, :, cp:]
+        print(f"Successfully added fullbody_genmo tokens, final length: {new_ids.shape[1]}")
+        return new_ids, new_masks
 
     # Process output and add face tokens
     def add_face_tokens_to_output(self, output_ids, output_modality_masks):
@@ -6202,8 +6315,9 @@ class ChatGLMForConditionalGenerationMotExpertNum2(ChatGLMPreTrainedModel, Gener
                 audio_groups.append(current_group)
                 current_group = []
 
-        # Handle the last group
-        if current_group:
+        # Handle the last group — only keep if complete (26 tokens)
+        # Incomplete groups mean generation ended mid-group; no motion should follow.
+        if current_group and len(current_group) == 26:
             audio_groups.append(current_group)
 
         print(f"Audio tokens divided into {len(audio_groups)} groups:")
@@ -6266,6 +6380,109 @@ class ChatGLMForConditionalGenerationMotExpertNum2(ChatGLMPreTrainedModel, Gener
         print(f"Successfully added face tokens, final length: {new_output_ids.shape[1]}")
         return new_output_ids, new_modality_masks
 
+    def add_face_tokens_to_output_style_control(self, output_ids, output_modality_masks, style_token_ids=None):
+        """
+        Add face tokens after audio segments with style control prefix.
+        Uses audio=25, face=51 (1 begin_of_motion + 50 face) per group.
+        Prepends style_control face tokens before the first audio group.
+
+        Args:
+            output_ids: [batch, seq_len] token IDs from first expert (text + audio)
+            output_modality_masks: [n_mod, batch, seq_len] modality masks
+            style_token_ids: [50] style face token IDs (already offset by 168736 if needed)
+        """
+        print("\n=== Adding Face Tokens (Style Control) ===")
+        AUDIO_GROUP_SIZE = 25
+        FACE_GROUP_SIZE = 51  # 1 begin_of_motion + 50 face tokens
+        BEGIN_OF_MOTION_ID = 1280  # relative ID for <|begin_of_motion|>
+
+        # Find all audio token positions (152353 <= token_id <= 168735)
+        audio_positions = []
+        for i, token_id in enumerate(output_ids[0]):
+            if 152353 <= token_id <= 168735:
+                audio_positions.append(i)
+
+        print(f"Found {len(audio_positions)} audio tokens")
+
+        if len(audio_positions) == 0:
+            print("No audio tokens found, returning original output")
+            return output_ids, output_modality_masks
+
+        # Group audio positions by AUDIO_GROUP_SIZE tokens per group
+        audio_groups = []
+        current_group = []
+        for i, pos in enumerate(audio_positions):
+            current_group.append(pos)
+            if len(current_group) == AUDIO_GROUP_SIZE or (i + 1 < len(audio_positions) and audio_positions[i + 1] != pos + 1):
+                audio_groups.append(current_group)
+                current_group = []
+        if current_group and len(current_group) == AUDIO_GROUP_SIZE:
+            audio_groups.append(current_group)
+
+        print(f"Audio tokens divided into {len(audio_groups)} groups")
+
+        # Calculate style token count
+        n_style = len(style_token_ids) if style_token_ids is not None else 0
+        # style_control: prefix text "style_control:" is already in the sequence from first expert
+        # We only need to insert the style face tokens as modality 2 tokens
+
+        total_face_tokens = len(audio_groups) * FACE_GROUP_SIZE + n_style
+        new_length = output_ids.shape[1] + total_face_tokens
+
+        print(f"Will add {n_style} style tokens + {len(audio_groups) * FACE_GROUP_SIZE} turn face tokens, new length: {new_length}")
+
+        device = output_ids.device
+        new_output_ids = 168736 * torch.ones(output_ids.shape[0], new_length, dtype=output_ids.dtype, device=device)
+        new_modality_masks = torch.zeros(output_modality_masks.shape[0], output_ids.shape[0], new_length,
+                                         dtype=output_modality_masks.dtype, device=device)
+
+        current_pos = 0
+        new_pos = 0
+        style_inserted = False
+
+        for group_idx, group in enumerate(audio_groups):
+            # Copy content before this audio group
+            segment_length = group[0] - current_pos
+            if segment_length > 0:
+                new_output_ids[:, new_pos:new_pos + segment_length] = output_ids[:, current_pos:group[0]]
+                new_modality_masks[:, :, new_pos:new_pos + segment_length] = output_modality_masks[:, :, current_pos:group[0]]
+                new_pos += segment_length
+
+            # Insert style tokens before the first audio group
+            if not style_inserted and n_style > 0:
+                style_tensor = torch.tensor(style_token_ids, dtype=output_ids.dtype, device=device).unsqueeze(0)
+                new_output_ids[:, new_pos:new_pos + n_style] = style_tensor
+                new_modality_masks[0, :, new_pos:new_pos + n_style] = False
+                new_modality_masks[1, :, new_pos:new_pos + n_style] = False
+                new_modality_masks[2, :, new_pos:new_pos + n_style] = True
+                new_pos += n_style
+                style_inserted = True
+
+            # Copy audio tokens
+            audio_length = len(group)
+            new_output_ids[:, new_pos:new_pos + audio_length] = output_ids[:, group[0]:group[-1] + 1]
+            new_modality_masks[:, :, new_pos:new_pos + audio_length] = output_modality_masks[:, :, group[0]:group[-1] + 1]
+            new_pos += audio_length
+
+            # Add face tokens: 1 begin_of_motion + 50 face placeholders
+            face_tokens = torch.zeros(1, FACE_GROUP_SIZE, dtype=output_ids.dtype, device=device)
+            face_tokens[0, 0] = BEGIN_OF_MOTION_ID
+            new_output_ids[:, new_pos:new_pos + FACE_GROUP_SIZE] = face_tokens
+            new_modality_masks[0, :, new_pos:new_pos + FACE_GROUP_SIZE] = False
+            new_modality_masks[1, :, new_pos:new_pos + FACE_GROUP_SIZE] = False
+            new_modality_masks[2, :, new_pos:new_pos + FACE_GROUP_SIZE] = True
+            new_pos += FACE_GROUP_SIZE
+
+            current_pos = group[-1] + 1
+
+        # Copy remaining content
+        if current_pos < output_ids.shape[1]:
+            remaining_length = output_ids.shape[1] - current_pos
+            new_output_ids[:, new_pos:new_pos + remaining_length] = output_ids[:, current_pos:]
+            new_modality_masks[:, :, new_pos:new_pos + remaining_length] = output_modality_masks[:, :, current_pos:]
+
+        print(f"Successfully added face tokens (style control), final length: {new_output_ids.shape[1]}")
+        return new_output_ids, new_modality_masks
 
     def forward_second_expert(
             self,
@@ -6722,6 +6939,7 @@ class ChatGLMForConditionalGenerationMotExpertNum2(ChatGLMPreTrainedModel, Gener
         position_encoding_indices: Optional[torch.Tensor] = None,
         past_key_values: Optional[torch.Tensor] = None,
         body_part: Optional[str] = None,
+        generation_start_idx: Optional[int] = None,
         **kwargs,
     ):
         """
@@ -6741,6 +6959,9 @@ class ChatGLMForConditionalGenerationMotExpertNum2(ChatGLMPreTrainedModel, Gener
             modality_masks: Masks for different modalities [n_modalities, batch_size, seq_length]
             position_encoding_indices: Position encoding indices [batch_size, seq_length]
             body_part: Body part to generate
+            generation_start_idx: If provided, override the auto-detected start position.
+                Used for style control where style face tokens (modality 2) appear before audio
+                and should be included as context but not as the generation start point.
             **kwargs: Additional keyword arguments
 
         Returns:
@@ -6752,12 +6973,10 @@ class ChatGLMForConditionalGenerationMotExpertNum2(ChatGLMPreTrainedModel, Gener
 
         # Initialize variables
         batch_size = input_ids.shape[0]
-        # unfinished_sequences = torch.ones(batch_size, dtype=torch.long, device=device)
 
         # Get initial position ids
         position_ids = self.get_position_ids(input_ids, device=device)
 
-        # # Initialize past key values
         if past_key_values is not None:
             use_cache = True
         else:
@@ -6765,7 +6984,11 @@ class ChatGLMForConditionalGenerationMotExpertNum2(ChatGLMPreTrainedModel, Gener
 
         mask = modality_masks[2,0]
 
-        idxs = torch.nonzero(mask, as_tuple=False).view(-1)[0] + 1 ## TODO: change to batch size
+        if generation_start_idx is not None:
+            # Use the explicitly provided start index (e.g., first begin_of_motion after audio)
+            idxs = generation_start_idx
+        else:
+            idxs = torch.nonzero(mask, as_tuple=False).view(-1)[0] + 1
         modality_masks_current = modality_masks[:, :, :idxs]
 
         # Prepare initial model kwargs
@@ -7131,9 +7354,21 @@ class ChatGLMForConditionalGenerationMotExpertNum2(ChatGLMPreTrainedModel, Gener
         if body_part == "face":
             first_modality_input_ids_with_body, first_modality_masks_with_body = self.add_face_tokens_to_output(first_modality_input_ids, first_modality_masks)
             position_encoding_indices = calculate_position_encoding_indices(first_modality_masks_with_body, modality_fps={1: 12.5, 2: 25.0})
+        elif body_part == "face_style_control":
+            style_token_ids = kwargs.pop("style_token_ids", None)
+            first_modality_input_ids_with_body, first_modality_masks_with_body = self.add_face_tokens_to_output_style_control(
+                first_modality_input_ids, first_modality_masks, style_token_ids=style_token_ids
+            )
+            position_encoding_indices = calculate_position_encoding_indices(first_modality_masks_with_body, modality_fps={1: 12.5, 2: 25.0})
         elif body_part == "body":
             first_modality_input_ids_with_body, first_modality_masks_with_body = self.add_body_tokens_to_output(first_modality_input_ids, first_modality_masks)
             position_encoding_indices = calculate_position_encoding_indices(first_modality_masks_with_body, modality_fps={1: 12.5, 2: 18.75})
+        elif body_part == "upper_lower_genmo":
+            first_modality_input_ids_with_body, first_modality_masks_with_body = self.add_upper_lower_genmo_tokens_to_output(first_modality_input_ids, first_modality_masks)
+            position_encoding_indices = calculate_position_encoding_indices(first_modality_masks_with_body, modality_fps={1: 12.5, 2: 12.5})
+        elif body_part == "fullbody_genmo":
+            first_modality_input_ids_with_body, first_modality_masks_with_body = self.add_fullbody_genmo_tokens_to_output(first_modality_input_ids, first_modality_masks)
+            position_encoding_indices = calculate_position_encoding_indices(first_modality_masks_with_body, modality_fps={1: 12.5, 2: 6.25})
         elif body_part == "face_body":
             first_modality_input_ids_with_body, first_modality_masks_with_body = self.add_face_body_tokens_to_output(first_modality_input_ids, first_modality_masks)
         else:

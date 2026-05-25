@@ -2,7 +2,6 @@
 configs
 configs/lm
 configs/mics
-docs
 experiments
 evaluation
 inference/mics
@@ -64,3 +63,11 @@ wheels/
 # OS specific
 .DS_Store
 AGENTS.md
+
+# Internal / not for open-source release
+CVPR2026_Results/
+docs_old/
+docs/1-data/_*_audit.md
+
+# Logs (write run logs to a scratch dir outside the repo, not into the working tree)
+*.log

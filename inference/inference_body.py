@@ -50,7 +50,7 @@ if ROOT_DIR in sys.path:
 sys.path.insert(0, ROOT_DIR)
 
 # Add conversational_agent directory to sys.path for conver_agent imports
-# This enables imports like: from conver_agent.archs.lom_vq import ...
+# This enables imports like: from multimodal_tokenizers.archs.lom_vq import ...
 # This is needed when using conda activate conver_agent environment
 # Path resolution priority:
 #   1) CONVERSATIONAL_AGENT_DIR environment variable (if set)
@@ -60,8 +60,9 @@ _conversational_agent_dir_env = os.getenv('CONVERSATIONAL_AGENT_DIR')
 if _conversational_agent_dir_env and os.path.exists(_conversational_agent_dir_env):
     CONVERSATIONAL_AGENT_DIR = _conversational_agent_dir_env
 else:
-    _relative_path = os.path.join(os.path.dirname(ROOT_DIR), 'conversational_agent')
-    CONVERSATIONAL_AGENT_DIR = _relative_path if os.path.exists(_relative_path) else '/simurgh/u/juze/code/conversational_agent'
+    # _relative_path = os.path.join(os.path.dirname(ROOT_DIR), 'conversational_agent')
+    _relative_path = ROOT_DIR
+    CONVERSATIONAL_AGENT_DIR = _relative_path
 
 if os.path.exists(CONVERSATIONAL_AGENT_DIR):
     if CONVERSATIONAL_AGENT_DIR in sys.path:
@@ -85,6 +86,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from tqdm import tqdm
+from einops import einsum as einsum_fn
 from transformers import (
     AutoTokenizer,
     AutoModel,
@@ -93,9 +95,7 @@ from transformers import (
 from transformers.modeling_utils import load_sharded_checkpoint
 
 from speech_related.flow_inference import AudioDecoder
-from multimodal_tokenizers.utils.rotation_conversions import axis_angle_to_6d
-from multimodal_tokenizers.utils.other_tools import velocity2position
-from multimodal_tokenizers.utils.renderer_utils import RenderBodyMesh
+from multimodal_tokenizers.utils.rotation_conversions import axis_angle_to_6d, rotation_6d_to_matrix
 from multimodal_tokenizers.utils.utils_videos import write_video
 
 # Re-ensure ROOT_DIR is at the front of sys.path after other imports
@@ -105,6 +105,10 @@ if ROOT_DIR in sys.path:
 sys.path.insert(0, ROOT_DIR)
 
 # Now import project-local utils modules (after dependencies, but with path re-asserted)
+from utils.genmo.geo_transform import apply_T_on_points, compute_T_ayfz2ay
+from utils.genmo.vis.renderer import Renderer, get_global_cameras_static, get_ground_params_from_points
+from utils.genmo.camera import create_camera_sensor
+from utils.genmo.smplx_utils import make_smplx
 from utils.token_utils import extract_modality_tokens_from_response
 from utils.tensor_utils import apply_body_token_offset
 from utils.model_loader import load_vae_models, load_smplx_model
@@ -155,20 +159,24 @@ POSE_LEFT_EYE_INDICES = (69, 72)  # Left eye pose indices
 POSE_RIGHT_EYE_INDICES = (72, 75)  # Right eye pose indices
 
 # Video rendering constants
-RENDER_IMAGE_SIZE = 512  # Output image size for video rendering
+RENDER_WIDTH = 1280  # Output video width
+RENDER_HEIGHT = 720  # Output video height
 RENDER_SCALE = 6.0  # Scale factor for mesh rendering
 VIDEO_COLOR_SCALE = 255.0  # Color scale for video output (0-255 range)
+RENDER_CAMERA_Y_OFFSET = -1.2  # Camera Y translation (more negative moves view down)
 
 # VAE model paths
-VAE_CHECKPOINT_MAIN = './model_files/pretrained_cpt/lom_vq_ds_new/lom_vq.ckpt'
-VAE_CHECKPOINT_FACE = os.path.join(CONVERSATIONAL_AGENT_DIR, 'model_files/pretrained_cpt/lom_vq_ds_new/face/epoch=29.ckpt')
-VAE_CHECKPOINT_GLOBAL = os.path.join(CONVERSATIONAL_AGENT_DIR, 'model_files/pretrained_cpt/lom_vq_ds_new/global_25/epoch=659.pth')
-
+VAE_CHECKPOINT_MAIN = './model_files/pretrained_cpt/body/lom_vq.ckpt'
+VAE_CHECKPOINT_FACE = os.path.join(CONVERSATIONAL_AGENT_DIR, 'model_files/pretrained_cpt/face/face.ckpt')
+# VAE_CHECKPOINT_GLOBAL = os.path.join(CONVERSATIONAL_AGENT_DIR, 'model_files/pretrained_cpt/lom_vq_ds_new/global_25/epoch=659.pth')
+VAE_CHECKPOINT_GLOBAL = './experiments/multimodal_tokenizer/VAE_Global_from_Lower54/checkpoints/last.ckpt'
 # SMPLX model path
 SMPLX_MODEL_DIR = os.environ.get(
     'VIBES_SMPLX_MODEL_DIR',
     os.path.join(ROOT_DIR, 'model_files', 'smplx_models'),
 )
+# GVHMR asset path (smplx2smpl, J_regressor, smpl_faces)
+GVHMR_ASSET_DIR = os.path.join(ROOT_DIR, 'model_files', 'gvhmr')
 
 # Audio decoder paths
 AUDIO_DECODER_CONFIG = os.path.join(ROOT_DIR, "speech_related", "glm-4-voice-decoder", "config.yaml")
@@ -182,6 +190,23 @@ MODALITY_BODY_IDX = 2  # Index of body motion modality
 # ============================================================================
 # Main Generation Function
 # ============================================================================
+
+def integrate_local_velocity(local_vel, global_orient_aa, init_pos=None):
+    """
+    Integrate root local velocity into world positions using global orientation.
+    local_vel: (T, 3), global_orient_aa: (T, 3)
+    """
+    global_6d = axis_angle_to_6d(global_orient_aa)
+    R = rotation_6d_to_matrix(global_6d)  # (T, 3, 3)
+    world_vel = torch.einsum("tij,tj->ti", R, local_vel)
+    pos = torch.zeros_like(world_vel)
+    if init_pos is None:
+        pos[0] = 0.0
+    else:
+        pos[0] = init_pos
+    if world_vel.shape[0] > 1:
+        pos[1:] = pos[0:1] + torch.cumsum(world_vel[1:], dim=0)
+    return pos
 
 def generate_motion_from_text(
     model,
@@ -302,8 +327,8 @@ def generate_motion_from_text(
     tts_speech, tts_mel = audio_decoder.token2wav(
         tts_token,
         uuid=this_uuid,
-                                                prompt_token=flow_prompt_speech_token.to(device),
-                                                prompt_feat=prompt_speech_feat.to(device),
+        prompt_token=flow_prompt_speech_token.to(device),
+        prompt_feat=prompt_speech_feat.to(device),
         finalize=True
     )
     final_speech = tts_speech[0].cpu()
@@ -370,22 +395,12 @@ def generate_motion_from_text(
     # Calculate Translation from Velocities
     # ========================================================================
     
-    # Extract velocity components from global motion
+    # Extract local velocity components from global motion
     rec_trans_v_s = rec_global["rec_pose"][:, :, GLOBAL_TRANSLATION_START_IDX:GLOBAL_TRANSLATION_END_IDX]
-    
-    # Convert velocities to positions by integration
-    rec_x_trans = velocity2position(
-        rec_trans_v_s[:, :, 0:1],
-        1 / MOTION_FPS,
-        torch.zeros(rec_trans_v_s[:, 0, 0:1].shape, device=device)
-    )
-    rec_z_trans = velocity2position(
-        rec_trans_v_s[:, :, 2:3],
-        1 / MOTION_FPS,
-        torch.zeros(rec_trans_v_s[:, 0, 2:3].shape, device=device)
-    )
-    rec_y_trans = rec_trans_v_s[:, :, 1:2]
-    rec_trans = torch.cat([rec_x_trans, rec_y_trans, rec_z_trans], dim=-1)
+
+    # Convert local velocity to world translation using global orientation
+    global_orient_aa = rec_pose[:, POSE_GLOBAL_ORIENT_INDICES[0]:POSE_GLOBAL_ORIENT_INDICES[1]]
+    rec_trans = integrate_local_velocity(rec_trans_v_s[0], global_orient_aa).unsqueeze(0)
     
     # Initialize shape parameters (betas) for SMPLX model
     rec_beta = torch.zeros(SMPLX_NUM_BETAS, device=device)
@@ -420,26 +435,59 @@ def generate_motion_from_text(
         )
 
     # ========================================================================
-    # Video Rendering
+    # Video Rendering (GENMO-style: SMPLX -> SMPL conversion + proper camera)
     # ========================================================================
-    
-    # Render each frame of the motion sequence
-    faces_smplx = torch.tensor(smplx_2020.faces.astype(np.int32), dtype=torch.int64)
-    mesh_renderer = RenderBodyMesh(
-        image_size=RENDER_IMAGE_SIZE,
-        faces=faces_smplx,
-        scale=RENDER_SCALE
+
+    # Load SMPL conversion assets
+    smplx2smpl = torch.load(
+        os.path.join(GVHMR_ASSET_DIR, "smplx2smpl_sparse.pt"), weights_only=True
+    ).to(device)
+    J_regressor = torch.load(
+        os.path.join(GVHMR_ASSET_DIR, "smpl_neutral_J_regressor.pt"), weights_only=True
+    ).to(device)
+    faces_smpl = make_smplx("smpl").faces
+
+    # Convert SMPLX vertices to SMPL vertices
+    verts_smplx = vertices_rec.vertices.detach()
+    verts_smpl = torch.stack([smplx2smpl @ v for v in verts_smplx])
+
+    # Normalize: origin XZ, floor level, face +Z
+    def _normalize_vertices(v, J_reg):
+        v = v.clone()
+        offset = einsum_fn(J_reg, v[0], "j v, v i -> j i")[0]
+        offset[1] = v[:, :, 1].min()
+        v -= offset
+        joints_for_rot = einsum_fn(J_reg, v[[0]], "j v, l v i -> l j i")
+        T_rot = compute_T_ayfz2ay(joints_for_rot, inverse=True)
+        return apply_T_on_points(v, T_rot)
+
+    verts = _normalize_vertices(verts_smpl, J_regressor)
+    joints = einsum_fn(J_regressor, verts, "j v, l v i -> l j i")
+
+    # Setup camera with 24mm lens
+    _, _, K = create_camera_sensor(RENDER_WIDTH, RENDER_HEIGHT, 24)
+    renderer = Renderer(
+        width=RENDER_WIDTH,
+        height=RENDER_HEIGHT,
+        device=device,
+        faces=faces_smpl,
+        K=K,
+        bin_size=0,
     )
+    scale, cx, cz = get_ground_params_from_points(joints[:, 0], verts)
+    renderer.set_ground(max(scale, 3) * 1.5, cx, cz)
+    cam_R, cam_T, lights = get_global_cameras_static(verts.cpu())
+
     pred_images = []
-    verts = vertices_rec.vertices.detach()
-    
+    color = torch.tensor([0.69, 0.39, 0.96], device=device)
     print("Rendering video frames...")
-    for v in tqdm(verts):
-        rgb = mesh_renderer(v[None])[0]
-        pred_images.append(rgb.cpu()[0] / VIDEO_COLOR_SCALE)
+    for i in tqdm(range(verts.shape[0])):
+        cams = renderer.create_camera(cam_R[i], cam_T[i])
+        img = renderer.render_with_ground(verts[[i]], color[None], cams, lights)
+        pred_images.append(img)
 
     # Stack frames and prepare audio
-    pred_images_tensor = torch.stack(pred_images)
+    pred_images_tensor = torch.from_numpy(np.stack(pred_images)).permute(0, 3, 1, 2)
     os.makedirs(output_dir, exist_ok=True)
     dump_path = os.path.join(output_dir, output_filename)
     
@@ -449,8 +497,9 @@ def generate_motion_from_text(
     audio_clip = audio_clip[:int(pred_images_tensor.shape[0] / MOTION_FPS * AUDIO_OUTPUT_SAMPLE_RATE)]
     
     # Write video with synchronized audio
+    # render_with_ground already returns uint8 images in 0-255 range
     write_video(
-        pred_images_tensor * VIDEO_COLOR_SCALE,
+        pred_images_tensor,
         dump_path,
         MOTION_FPS,
         audio_clip,
@@ -475,7 +524,7 @@ def main():
     parser.add_argument(
         '--checkpoint',
         type=str,
-                       default="/scr/juze/experiments/glm4voice_conversational_mot_layernum_40_modalitynum_3_rotation_body_v6/checkpoint-76500",
+        default="/path/to/experiments/glm4voice_conversational_mot_layernum_40_modalitynum_3_rotation_body_a2m_v6/checkpoint-109000",
         help='Path to the trained model checkpoint directory'
     )
     parser.add_argument(

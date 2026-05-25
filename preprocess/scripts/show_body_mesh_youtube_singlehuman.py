@@ -8,20 +8,20 @@ import torch
 from os.path import join, exists
 import os
 import argparse
-from conver_agent.utils.renderer_utils import RenderBodyMesh
+from multimodal_tokenizers.utils.renderer_utils import RenderBodyMesh
 import matplotlib
 import matplotlib.pyplot as plt
 import torchaudio
-from conver_agent.utils.utils_videos import write_video
+from multimodal_tokenizers.utils.utils_videos import write_video
 import cv2
 import matplotlib.pyplot as plt
 matplotlib.use('Agg')
 from tqdm import tqdm
-from conver_agent.utils.rotation_conversions import rotation_6d_to_axis_angle, axis_angle_to_6d, axis_angle_to_6d_np, matrix_to_axis_angle
+from multimodal_tokenizers.utils.rotation_conversions import rotation_6d_to_axis_angle, axis_angle_to_6d, axis_angle_to_6d_np, matrix_to_axis_angle
 import smplx
 import pickle
 from joblib import load
-from conver_agent.utils.utils_4dhumans import Renderer, cam_crop_to_full
+from multimodal_tokenizers.utils.utils_4dhumans import Renderer, cam_crop_to_full
 
 def save_obj(verts, faces, path):
     """Save mesh vertices and faces to an OBJ file."""
@@ -31,12 +31,12 @@ def save_obj(verts, faces, path):
 import soundfile as sf
 
 # ---------------------- Configurable Dataset and Model Paths ----------------------
-# FLAME_COEFFS_DIR = "/simurgh/group/juze/datasets/YouTube_Talking/FLAME_coeffs"
-# FLAME_COEFFS_DIR = "/simurgh/group/yuheng/youtube_spectre_mica/Talk_video_summary_English_20241226/FLAME_coeffs_1"
-SMPL_COEFFS_DIR = "/simurgh/group/juze/datasets/YouTube_Talking/4d_humans_results_single_person"
+# FLAME_COEFFS_DIR = "/path/to/YouTube_Talking/FLAME_coeffs"
+# FLAME_COEFFS_DIR = "/path/to/youtube_spectre_mica/Talk_video_summary_English_20241226/FLAME_coeffs_1"
+SMPL_COEFFS_DIR = "/path/to/YouTube_Talking/4d_humans_results_single_person"
 
-VIDEO_DIR = "/simurgh/group/juze/datasets/YouTube_Talking/video_20241226"
-AUDIO_DIR = "/simurgh/group/juze/datasets/YouTube_Talking/audios_original"
+VIDEO_DIR = "/path/to/YouTube_Talking/video_20241226"
+AUDIO_DIR = "/path/to/YouTube_Talking/audios_original"
 MODEL_DIR = "./model_files/FLAME2020/"
 SMPL_PATH = "../language_of_motion/model_files/smplx_models"
 OUTPUT_DIR = "./output_videos"

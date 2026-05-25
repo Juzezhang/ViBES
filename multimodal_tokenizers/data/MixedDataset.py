@@ -45,12 +45,6 @@ class MixedDataModule(BASEDataModule):
         self.hparams.smpl_path = cfg.DATASET.SMPLX_MODEL_DIR
         self.hparams.njoints = 55
 
-        # Get normalization settings for preprocessed data (passed to all datasets, used when preprocessed_dir is present)
-        normalization_dir = OmegaConf.select(cfg, "DATASET.normalization_dir")
-        normalize_cfg = OmegaConf.select(cfg, "DATASET.normalize")
-        self.hparams.normalization_dir = normalization_dir
-        self.hparams.normalize = True if normalize_cfg is None else normalize_cfg
-
         # Check if using preprocessed datasets (has preprocessed_dir in any dataset config)
         use_preprocessed = self._check_preprocessed_datasets(dataset_configs)
 
@@ -70,7 +64,7 @@ class MixedDataModule(BASEDataModule):
             elif cfg.Selected_part == 'face':
                 self.Dataset = FaceVQDataset
                 self.DatasetEval = FaceVQDataset
-            elif cfg.Selected_part in ['compositional', 'full_rot', 'full_h3d', 'full_genmo', 'upper_lower_global']:
+            elif cfg.Selected_part in ['compositional', 'full_rot', 'full_h3d', 'full_genmo', 'genmo_lower', 'genmo_upper', 'upper_lower_global']:
                 self.Dataset = MixedDatasetVQ
                 self.DatasetEval = MixedDatasetVQ
             elif cfg.Selected_part == 'global':
@@ -93,7 +87,7 @@ class MixedDataModule(BASEDataModule):
                 raise ValueError("CANDOR dataset configuration not found in dataset_configs")
             
             # Get dataset paths
-            data_root = cfg.DATASET.CANDOR.ROOT if hasattr(cfg.DATASET, "CANDOR") else "/simurgh/u/juze/datasets/CANDOR"
+            data_root = cfg.DATASET.CANDOR.ROOT if hasattr(cfg.DATASET, "CANDOR") else "/path/to/CANDOR"
             preprocessed_dir = candor_config.get("preprocessed_dir", "processed_candor_dataset")
             dataset_file = candor_config.get("dataset_file", "candor_dataset.jsonl")
             

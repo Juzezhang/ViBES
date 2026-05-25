@@ -6,10 +6,10 @@ import imageio
 import moviepy.editor as mp
 from pathlib import Path
 from scipy.spatial.transform import Rotation as RRR
-import conver_agent.render.matplot.plot_3d_global as plot_3d
-from conver_agent.render.pyrender.hybrik_loc2rot import HybrIKJointsToRotmat
-from conver_agent.data.humanml.scripts.motion_process import process_file, recover_from_ric
-from conver_agent.config import parse_args
+import multimodal_tokenizers.render.matplot.plot_3d_global as plot_3d
+from multimodal_tokenizers.render.pyrender.hybrik_loc2rot import HybrIKJointsToRotmat
+from multimodal_tokenizers.data.humanml.scripts.motion_process import process_file, recover_from_ric
+from multimodal_tokenizers.config import parse_args
 from os.path import join
 
 # Set environment variables for rendering

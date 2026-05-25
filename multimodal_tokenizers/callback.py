@@ -66,6 +66,18 @@ def getCheckpointCallback(cfg, logger=None, **kwargs):
     })
     callbacks.append(ModelCheckpoint(**checkpointParams))
 
+    # For CLIP evaluator: save best checkpoint by val loss
+    if getattr(cfg.TRAIN, 'STAGE', '') == 'clip':
+        callbacks.append(ModelCheckpoint(
+            dirpath=os.path.join(cfg.FOLDER_EXP, "checkpoints"),
+            filename="best-val-{epoch}",
+            monitor="val_mpjpe",
+            mode="min",
+            save_top_k=1,
+            every_n_epochs=cfg.LOGGER.VAL_EVERY_STEPS,
+            save_on_train_epoch_end=False,
+        ))
+
     metrics = cfg.METRIC.TYPE
     metric_monitor_map = {
         'TemosMetric': {

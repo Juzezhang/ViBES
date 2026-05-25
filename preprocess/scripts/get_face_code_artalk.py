@@ -3,19 +3,19 @@ import numpy as np
 import pytorch_lightning as pl
 from pathlib import Path
 from tqdm import tqdm
-from conver_agent.config import parse_args
-from conver_agent.data.build_data import build_data
-from conver_agent.models.build_model import build_model
+from multimodal_tokenizers.config import parse_args
+from multimodal_tokenizers.data.build_data import build_data
+from multimodal_tokenizers.models.build_model import build_model
 from loguru import logger
-from conver_agent.utils.load_checkpoint import load_pretrained_vae_face
-from conver_agent.utils.renderer_utils import RenderMesh
-from conver_agent.utils.utils_videos import write_video
+from multimodal_tokenizers.utils.load_checkpoint import load_pretrained_vae_face
+from multimodal_tokenizers.utils.renderer_utils import RenderMesh
+from multimodal_tokenizers.utils.utils_videos import write_video
 from smplx import FLAME
 import torch
 import cv2
 import torchaudio
-from conver_agent.utils.rotation_conversions import axis_angle_to_6d, axis_angle_to_matrix, rotation_6d_to_axis_angle, axis_angle_to_6d_np
-from conver_agent.archs.bitwise_vae import BITWISE_VAE
+from multimodal_tokenizers.utils.rotation_conversions import axis_angle_to_6d, axis_angle_to_matrix, rotation_6d_to_axis_angle, axis_angle_to_6d_np
+from multimodal_tokenizers.archs.bitwise_vae import BITWISE_VAE
 import json
 import torch.nn as nn
 
@@ -149,7 +149,7 @@ def main():
         if show_comparison:
             faces = torch.LongTensor(flame_model.faces.astype(np.int64))
             mesh_renderer = RenderMesh(image_size=256, faces=faces, scale=1.0)
-            audio_path = f"/simurgh/u/juze/datasets/TFHP/audios/{seq_name}.wav"
+            audio_path = f"/path/to/TFHP/audios/{seq_name}.wav"
             audio, sr = torchaudio.load(audio_path)
             audio = torchaudio.transforms.Resample(sr, 16000)(audio).mean(dim=0)
             rec_face_head_p1 = rotation_6d_to_axis_angle(rec_face_test_p1[0, :,:6])

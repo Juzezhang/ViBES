@@ -238,6 +238,10 @@ def load_pretrained_vae_body(cfg, model, logger, phase="train"):
         if 'vae_body' in key:
             new_key = key.replace('vae_body.', '')
             state_dict_body[new_key] = value
+        elif 'vae_lower' in key:
+            # Hybrid checkpoint: vae_lower maps to vae_body
+            new_key = key.replace('vae_lower.', '')
+            state_dict_body[new_key] = value
 
     model.vae_body.load_state_dict(state_dict_body, strict=True)
     if logger:

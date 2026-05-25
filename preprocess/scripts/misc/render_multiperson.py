@@ -35,7 +35,7 @@ def parse_args(self, args=None, namespace=None):
 setattr(ArgumentParser, 'parse_args_bak', ArgumentParser.parse_args)
 setattr(ArgumentParser, 'parse_args', parse_args)
 
-from conver_agent.config import parse_args
+from multimodal_tokenizers.config import parse_args
 
 
 def render_cli() -> None:
@@ -76,8 +76,8 @@ def render_cli() -> None:
             print(f"begin to render for {paths[0]}")
 
         import numpy as np
-        from conver_agent.render.blender import render_multiperson
-        from conver_agent.render.video import Video
+        from multimodal_tokenizers.render.blender import render_multiperson
+        from multimodal_tokenizers.render.video import Video
 
         init = True
         data_list = []

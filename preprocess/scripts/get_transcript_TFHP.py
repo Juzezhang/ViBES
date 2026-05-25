@@ -75,87 +75,84 @@ def save_coef(output_file, coef_data):
     np.savez(output_file, **coef_data)
 
 def main():
-    # 加载Whisper模型
-    print("Loading Whisper model...")
-    model = WhisperModel("medium", device="cpu", compute_type="int8")
-    
-    # LMDB 路径
-    # lmdb_path = "/simurgh/u/juze/code/conversational_agent/datasets/TFHP/HDTF_TFHP-lmdb"
-    lmdb_path = "/simurgh/u/juze/datasets/TFHP/HDTF_TFHP-lmdb"
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Extract audio (.wav), Whisper-transcribed transcripts (.txt), and FLAME coefficients (.npz) "
+                    "from the TFHP LMDB database. One file per LMDB key into <speaker>/<session>/ subfolders.",
+    )
+    parser.add_argument("--lmdb_path", type=str, required=True,
+                        help="[INPUT] Path to the HDTF_TFHP-lmdb directory.")
+    parser.add_argument("--output_dir", type=str, required=True,
+                        help="[OUTPUT] TFHP processed root. Will create audios/, transcripts/, coef/ under it.")
+    parser.add_argument("--whisper_model", type=str, default="medium",
+                        help="faster_whisper model name (default: medium).")
+    parser.add_argument("--whisper_device", type=str, default="cpu",
+                        help="Device for Whisper (default: cpu; use 'cuda' for GPU).")
+    parser.add_argument("--max_samples", type=int, default=None,
+                        help="Cap the number of LMDB keys to process (default: process all). Useful for smoke tests.")
+    args = parser.parse_args()
 
-    # 打开 LMDB
-    env = lmdb.open(lmdb_path, readonly=True, lock=False, readahead=False, meminit=False)
-    
-    # 创建输出目录
-    transcript_dir = "/simurgh/u/juze/datasets/TFHP/transcripts"
-    coef_dir = "/simurgh/u/juze/datasets/TFHP/coef"
+    print(f"Loading Whisper model ({args.whisper_model} on {args.whisper_device})...")
+    compute_type = "int8" if args.whisper_device == "cpu" else "float16"
+    model = WhisperModel(args.whisper_model, device=args.whisper_device, compute_type=compute_type)
+
+    env = lmdb.open(args.lmdb_path, readonly=True, lock=False, readahead=False, meminit=False)
+
+    transcript_dir = os.path.join(args.output_dir, "transcripts")
+    coef_dir = os.path.join(args.output_dir, "coef")
+    audio_dir = os.path.join(args.output_dir, "audios")
     os.makedirs(transcript_dir, exist_ok=True)
     os.makedirs(coef_dir, exist_ok=True)
-    
-    # 创建日志文件
+    os.makedirs(audio_dir, exist_ok=True)
+
     log_file = os.path.join(transcript_dir, "processing_log.txt")
-    
+
     with env.begin() as txn:
         cursor = txn.cursor()
-        total_samples = sum(1 for _ in cursor)  # 计算总样本数
-        cursor = txn.cursor()  # 重置游标
-        
-        # 使用tqdm显示进度
+        total_samples = sum(1 for _ in cursor)
+        if args.max_samples is not None:
+            total_samples = min(total_samples, args.max_samples)
+        cursor = txn.cursor()
+
         with tqdm(total=total_samples, desc="Processing audio files") as pbar:
-            for key, value in cursor:
+            for processed, (key, value) in enumerate(cursor):
+                if args.max_samples is not None and processed >= args.max_samples:
+                    break
                 try:
-                    # 获取原始文件名（从key中解码）
                     sequence_name = key.decode('utf-8')
-                    # if sequence_name != 'TH_00269/003/003':
-                    #     continue
                     if sequence_name.split('/')[-1] == 'metadata':
                         continue
-                    # 解析数据
                     data = pickle.loads(value)
                     audio_bytes = data['audio']
                     coef_data = data['coef']
-                    
-                    # 将字节数据转换为音频数组
+
                     audio_io = io.BytesIO(audio_bytes)
                     audio, sample_rate = sf.read(audio_io)
-                    
-                    # 处理音频数据
+
                     processed_audio = process_audio(audio, sample_rate)
-                    
-                    # 获取转录文本和时间戳
                     segments, info = get_transcription_with_timestamps(model, processed_audio)
-                    
-                    # 保存转录结果
+
                     transcript_file = os.path.join(transcript_dir, f"{sequence_name}.txt")
                     os.makedirs(os.path.dirname(transcript_file), exist_ok=True)
                     save_transcript(transcript_file, segments, info)
-                    
-                    # 保存coef数据
+
                     coef_file = os.path.join(coef_dir, f"{sequence_name}.npz")
                     os.makedirs(os.path.dirname(coef_file), exist_ok=True)
                     save_coef(coef_file, coef_data)
-                    
-                    # 保存音频数据（wav格式）
-                    audio_file = os.path.join("/simurgh/u/juze/datasets/TFHP/audios", f"{sequence_name}.wav")
+
+                    audio_file = os.path.join(audio_dir, f"{sequence_name}.wav")
                     os.makedirs(os.path.dirname(audio_file), exist_ok=True)
                     sf.write(audio_file, audio, sample_rate)
-                    
-                    # 更新进度条
+
                     pbar.update(1)
-                    
                 except Exception as e:
-                    # # 记录错误到日志文件
-                    # with open(log_file, 'a', encoding='utf-8') as f:
-                    #     f.write(f"Error processing sequence {sequence_name}: {str(e)}\n")
-                    # if sequence_name == 'TH_00269/003/003':
-                    #     pass
                     print(f"Error processing sequence {sequence_name}: {str(e)}")
                     continue
-    
+
     print(f"\nProcessing complete.")
-    print(f"Transcripts saved in {transcript_dir}")
-    print(f"Coef data saved in {coef_dir}")
-    print(f"Check {log_file} for any processing errors.")
+    print(f"Audios saved in       {audio_dir}")
+    print(f"Transcripts saved in  {transcript_dir}")
+    print(f"Coef data saved in    {coef_dir}")
 
 if __name__ == "__main__":
     main()

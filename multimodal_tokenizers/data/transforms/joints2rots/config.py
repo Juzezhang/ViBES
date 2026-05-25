@@ -1,7 +1,7 @@
 import numpy as np
 import os
 from pathlib import Path
-from conver_agent.utils.joints import mmm_joints, smplh2mmm_indexes
+from multimodal_tokenizers.utils.joints import mmm_joints, smplh2mmm_indexes
 
 # Map joints Name to SMPL joints idx
 JOINT_MAP = {

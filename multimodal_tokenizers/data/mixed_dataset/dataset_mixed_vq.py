@@ -80,8 +80,6 @@ class MixedDatasetVQ(data.Dataset):
         use_cache=False,  # Whether to load data from cache when available
         save_cache=False,  # Whether to save processed data to cache
         cache_format="pkl", # Format to use for caching: "h5", "npz", or "pkl"
-        normalization_dir=None,  # Directory containing Mean.npy and Std.npy for preprocessed data
-        normalize=True,  # Whether to apply normalization to preprocessed data
         **kwargs,
     ):
         """
@@ -101,8 +99,6 @@ class MixedDatasetVQ(data.Dataset):
         - use_cache: Whether to load data from cache when available.
         - save_cache: Whether to save processed data to cache.
         - cache_format: Format to use for caching ("h5", "npz", or "pkl").
-        - normalization_dir: Directory containing Mean.npy and Std.npy for preprocessed data.
-        - normalize: Whether to apply normalization to preprocessed data.
         """
         # Store debug flag for cache path generation
         self.debug = debug
@@ -127,14 +123,6 @@ class MixedDatasetVQ(data.Dataset):
         self.lower_with_betas = getattr(self.args, "LOWER_WITH_BETAS", False)
         self.lower_beta_dim = int(getattr(self.args, "LOWER_BETA_DIM", 10))
         self.selected_part = kwargs.get("selected_part")
-
-        # Normalization for preprocessed data
-        self.normalization_dir = normalization_dir
-        self.normalize_preprocessed = normalize
-        self.preprocess_mean = None
-        self.preprocess_std = None
-        if normalization_dir and normalize:
-            self._load_normalization_stats(normalization_dir)
 
         # Store kwargs for SMPLX initialization if needed
         if motion_representation == "rotation":
@@ -499,27 +487,6 @@ class MixedDatasetVQ(data.Dataset):
                 ext='npz',
                 use_pca=False,
                 ).cuda().eval()
-
-    def _load_normalization_stats(self, normalization_dir):
-        """Load Mean.npy and Std.npy from normalization directory for preprocessed data."""
-        mean_path = os.path.join(normalization_dir, 'Mean.npy')
-        std_path = os.path.join(normalization_dir, 'Std.npy')
-
-        if os.path.exists(mean_path) and os.path.exists(std_path):
-            self.preprocess_mean = np.load(mean_path).astype(np.float32)
-            self.preprocess_std = np.load(std_path).astype(np.float32)
-            # Prevent division by zero
-            self.preprocess_std = np.where(self.preprocess_std < 1e-8, 1.0, self.preprocess_std)
-            print(f"Loaded normalization stats from {normalization_dir}")
-        else:
-            print(f"Warning: Normalization files not found in {normalization_dir}")
-            self.normalize_preprocessed = False
-
-    def _normalize_motion(self, motion):
-        """Apply normalization to preprocessed motion vector."""
-        if self.preprocess_mean is not None and self.preprocess_std is not None:
-            return (motion - self.preprocess_mean) / self.preprocess_std
-        return motion
 
     def _load_preprocessed_beat2(self, config):
         """
@@ -949,10 +916,6 @@ class MixedDatasetVQ(data.Dataset):
                 continue
 
             segment = motion_vector[start_idx:end_idx].copy()
-
-            # Apply normalization if enabled
-            if self.normalize_preprocessed and self.preprocess_mean is not None:
-                segment = self._normalize_motion(segment)
 
             segment_name = f"{prefix}_{i}"
 
@@ -3036,7 +2999,7 @@ class MixedDatasetVQ(data.Dataset):
             "id_name": formatted_data.get('id', ""),
             "dataset_name": formatted_data.get('dataset_name', ""),
             "split_name": "vq",
-            "select_part": "full_genmo" if "motion_vector" in formatted_data else "compositional",
+            "select_part": "full_genmo" if "motion_vector" in formatted_data else "compositional",  # also valid: genmo_lower, genmo_upper
             "motion_len": motion_len,
             "collate_key": collate_key,
             # "motion_len_1": motion_len_1,

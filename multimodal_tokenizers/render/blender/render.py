@@ -11,7 +11,7 @@ from .sampler import get_frameidx
 from .scene import setup_scene  # noqa
 from .tools import delete_objs, load_numpy_vertices_into_blender, style_detect
 from .vertices import prepare_vertices
-from conver_agent.utils.joints import smplh_to_mmm_scaling_factor
+from multimodal_tokenizers.utils.joints import smplh_to_mmm_scaling_factor
 
 
 def prune_begin_end(data, perc):

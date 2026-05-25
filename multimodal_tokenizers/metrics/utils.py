@@ -89,14 +89,16 @@ def calculate_activation_statistics(activations):
     return mu, sigma
 
 
-def calculate_activation_statistics_np(activations):
+def calculate_activation_statistics_np(activations, emb_scale=1.0):
     """
     Params:
     -- activation: num_samples x dim_feat
+    -- emb_scale: optional scalar applied to embeddings before statistics
     Returns:
     -- mu: dim_feat
     -- sigma: dim_feat x dim_feat
     """
+    activations = activations * emb_scale
     mu = np.mean(activations, axis=0)
     cov = np.cov(activations, rowvar=False)
     return mu, cov
@@ -227,20 +229,24 @@ def calculate_diversity(activation, diversity_times):
     return dist.mean()
 
 
-def calculate_diversity_np(activation, diversity_times):
+def calculate_diversity_np(
+    activation, diversity_times, emb_scale=1.0, pair_divisor=1.0
+):
     assert len(activation.shape) == 2
     assert activation.shape[0] > diversity_times
     num_samples = activation.shape[0]
 
+    activation = activation * emb_scale
     first_indices = np.random.choice(num_samples,
                                      diversity_times,
                                      replace=False)
     second_indices = np.random.choice(num_samples,
                                       diversity_times,
                                       replace=False)
-    dist = scipy.linalg.norm(activation[first_indices] -
-                             activation[second_indices],
-                             axis=1)
+    dist = scipy.linalg.norm(
+        (activation[first_indices] - activation[second_indices]) / pair_divisor,
+        axis=1,
+    )
     return dist.mean()
 
 

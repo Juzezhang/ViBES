@@ -3,12 +3,12 @@ import glob
 import torch
 import pytorch_lightning as pl
 from omegaconf import OmegaConf
-from conver_agent.callback import build_callbacks
-from conver_agent.config import parse_args, instantiate_from_config
-from conver_agent.data.build_data import build_data
-from conver_agent.models.build_model import build_model
-from conver_agent.utils.logger import create_logger
-from conver_agent.utils.load_checkpoint import load_pretrained, load_pretrained_vae, load_pretrained_without_vqvae
+from multimodal_tokenizers.callback import build_callbacks
+from multimodal_tokenizers.config import parse_args, instantiate_from_config
+from multimodal_tokenizers.data.build_data import build_data
+from multimodal_tokenizers.models.build_model import build_model
+from multimodal_tokenizers.utils.logger import create_logger
+from multimodal_tokenizers.utils.load_checkpoint import load_pretrained, load_pretrained_vae, load_pretrained_without_vqvae
 from utils_emage import other_tools
 
 def main():
@@ -52,20 +52,20 @@ def main():
     # if cfg.TRAIN.PRETRAINED:
     #     load_pretrained_without_vqvae(cfg, model, logger)
 
-    # checkpoint_path = "/afs/cs.stanford.edu/u/juze/code/exp_motion/language_of_motion/experiments/lom/VQVAE_AMASS_upper_lower_papervision_debug/checkpoints/epoch=79.ckpt"
+    # checkpoint_path = "/path/to/code/exp_motion/language_of_motion/experiments/lom/VQVAE_AMASS_upper_lower_papervision_debug/checkpoints/epoch=79.ckpt"
     # state_dict = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     # print("State dict keys:", state_dict.keys())
     
 
-    # checkpoint_path_mgpt = "/afs/cs.stanford.edu/u/juze/code/exp_motion/motiongpt/checkpoints/MotionGPT-base/motiongpt_s3_h3d.tar"
+    # checkpoint_path_mgpt = "/path/to/code/exp_motion/motiongpt/checkpoints/MotionGPT-base/motiongpt_s3_h3d.tar"
     # state_dict_mgpt = torch.load(checkpoint_path_mgpt, map_location="cpu", weights_only=False)
     # Load and process all VAE checkpoints
     checkpoint_paths = {
-        'face': "/afs/cs.stanford.edu/u/juze/code/exp_motion/language_of_motion/models/emage_vq/last_790_face_v2.bin",
-        'hand': "/afs/cs.stanford.edu/u/juze/code/exp_motion/language_of_motion/models/emage_vq/hands_vertex_1layer_710.bin",
-        'upper': "/afs/cs.stanford.edu/u/juze/code/exp_motion/language_of_motion/models/emage_vq/upper_vertex_1layer_710.bin",
-        'lower': "/afs/cs.stanford.edu/u/juze/code/exp_motion/language_of_motion/models/emage_vq/lower_foot_600.bin",
-        'global': "/afs/cs.stanford.edu/u/juze/code/exp_motion/language_of_motion/models/emage_vq/last_1700_foot.bin"
+        'face': "/path/to/code/exp_motion/language_of_motion/models/emage_vq/last_790_face_v2.bin",
+        'hand': "/path/to/code/exp_motion/language_of_motion/models/emage_vq/hands_vertex_1layer_710.bin",
+        'upper': "/path/to/code/exp_motion/language_of_motion/models/emage_vq/upper_vertex_1layer_710.bin",
+        'lower': "/path/to/code/exp_motion/language_of_motion/models/emage_vq/lower_foot_600.bin",
+        'global': "/path/to/code/exp_motion/language_of_motion/models/emage_vq/last_1700_foot.bin"
         
     }
 
@@ -77,7 +77,7 @@ def main():
             combined_state_dict[new_key] = value
     
     # Save the combined weights to a checkpoint file
-    save_path = "/afs/cs.stanford.edu/u/juze/code/exp_motion/language_of_motion/models/pretrained_vq_emage/vq_emage_speaker_2.ckpt"
+    save_path = "/path/to/code/exp_motion/language_of_motion/models/pretrained_vq_emage/vq_emage_speaker_2.ckpt"
     torch.save({'state_dict': combined_state_dict}, save_path)
     print(f"Saved combined checkpoint to {save_path}")
 

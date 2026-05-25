@@ -62,32 +62,39 @@ def get_local_transl_vel(transl, global_orient):
 def validate_beat2_file(data):
     """
     Validate that the file is a proper BEAT2 SMPL-X file.
-    Returns: (is_valid, reason)
+    Returns: (is_valid, reason, is_already_genmo)
     """
+    # Check if file is already in GENMO format
+    if 'motion_vector' in data and 'num_frames' in data:
+        motion_vector = data['motion_vector']
+        if len(motion_vector.shape) == 2 and motion_vector.shape[1] in [145, 149]:
+            return True, "Already GENMO format", True
+
+    # Check if it's raw SMPL-X format
     required_keys = ['poses', 'trans', 'betas']
     for key in required_keys:
         if key not in data:
-            return False, f"Missing required key: {key}"
-    
+            return False, f"Missing required key: {key}", False
+
     poses = data['poses']
     if len(poses.shape) != 2:
-        return False, f"poses should be 2D array, got shape {poses.shape}"
-    
+        return False, f"poses should be 2D array, got shape {poses.shape}", False
+
     pose_dim = poses.shape[1]
     if pose_dim < 66:
-        return False, f"Pose dimension {pose_dim} too small"
-    
+        return False, f"Pose dimension {pose_dim} too small", False
+
     trans = data['trans']
     if len(trans.shape) != 2 or trans.shape[1] != 3:
-        return False, f"trans should be (L, 3), got shape {trans.shape}"
-    
+        return False, f"trans should be (L, 3), got shape {trans.shape}", False
+
     if poses.shape[0] != trans.shape[0]:
-        return False, f"Frame count mismatch: poses={poses.shape[0]}, trans={trans.shape[0]}"
-    
+        return False, f"Frame count mismatch: poses={poses.shape[0]}, trans={trans.shape[0]}", False
+
     if poses.shape[0] < 2:
-        return False, f"Too few frames: {poses.shape[0]}"
-    
-    return True, "Valid"
+        return False, f"Too few frames: {poses.shape[0]}", False
+
+    return True, "Valid", False
 
 
 def convert_beat2_to_genmo(data):
@@ -234,7 +241,7 @@ def verify_conversion(input_dir, output_dir, num_files=5):
 def process_directory(input_dir, output_dir, max_files=None):
     input_dir, output_dir = Path(input_dir), Path(output_dir)
     npz_files = list(input_dir.rglob('*.npz'))
-    stats = {'processed': 0, 'skipped_invalid': 0, 'skipped_error': 0, 'skipped_existing': 0, 'errors': []}
+    stats = {'processed': 0, 'copied': 0, 'skipped_invalid': 0, 'skipped_error': 0, 'skipped_existing': 0, 'errors': []}
     
     processed_count = 0
     for npz_path in tqdm(npz_files, desc="Processing"):
@@ -252,12 +259,23 @@ def process_directory(input_dir, output_dir, max_files=None):
         out_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             data = np.load(npz_path, allow_pickle=True)
-            if not validate_beat2_file(data)[0]:
+            is_valid, reason, is_already_genmo = validate_beat2_file(data)
+
+            if not is_valid:
                 stats['skipped_invalid'] += 1
                 continue
-            res = convert_beat2_to_genmo(data)
-            np.savez_compressed(out_path, **res)
-            stats['processed'] += 1
+
+            if is_already_genmo:
+                # File is already in GENMO format, just copy it
+                import shutil
+                shutil.copy2(npz_path, out_path)
+                stats['copied'] += 1
+            else:
+                # Convert raw SMPL-X to GENMO format
+                res = convert_beat2_to_genmo(data)
+                np.savez_compressed(out_path, **res)
+                stats['processed'] += 1
+
             processed_count += 1
         except Exception as e:
             stats['skipped_error'] += 1
@@ -266,30 +284,42 @@ def process_directory(input_dir, output_dir, max_files=None):
 
 
 def main():
-    # Process only the smplxflame folders
-    base_input = Path("/simurgh2/datasets/BEAT2/beat_english_v2.0.0")
-    base_output = Path("/simurgh2/datasets/BEAT2/beat_english_v2.0.0/beat2_genmo_25")
-    
-    # Set to None for full dataset, or an integer for testing
-    MAX_FILES_PER_SUBDIR = None
-    
-    subdirs = ["smplxflame_25", "smplxflame_25_mirror"]
-    
-    total_stats = {'processed': 0, 'skipped_invalid': 0, 'skipped_error': 0, 'skipped_existing': 0}
-    
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Convert BEAT2 SMPL-X motion (25 fps + mirror) to GENMO 145D format.",
+    )
+    parser.add_argument("--input_dir", type=str, required=True,
+                        help="[INPUT] BEAT2 root containing the smplxflame_25/ and smplxflame_25_mirror/ subfolders (e.g. <BEAT2_ROOT>).")
+    parser.add_argument("--output_dir", type=str, required=True,
+                        help="[OUTPUT] Where to write GENMO 145D .npz files, mirroring the input subfolder structure (e.g. <BEAT2_ROOT>/beat2_genmo_25).")
+    parser.add_argument("--subdirs", type=str, nargs="+",
+                        default=["smplxflame_25", "smplxflame_25_mirror"],
+                        help="Subdirectories under --input_dir to process (default: both original and mirror).")
+    parser.add_argument("--max_files_per_subdir", type=int, default=None,
+                        help="Cap files per subdirectory for quick testing (default: process everything).")
+    args = parser.parse_args()
+
+    base_input = Path(args.input_dir)
+    base_output = Path(args.output_dir)
+    subdirs = args.subdirs
+    max_files = args.max_files_per_subdir
+
+    total_stats = {'processed': 0, 'copied': 0, 'skipped_invalid': 0, 'skipped_error': 0, 'skipped_existing': 0}
+
     for subdir in subdirs:
         input_dir = base_input / subdir
         output_dir = base_output / subdir
         if not input_dir.exists():
+            print(f"  (skipping {subdir} — not found at {input_dir})")
             continue
-            
+
         print(f"\nProcessing {subdir}...")
-        stats = process_directory(input_dir, output_dir, max_files=MAX_FILES_PER_SUBDIR)
+        stats = process_directory(input_dir, output_dir, max_files=max_files)
         for k in total_stats:
             total_stats[k] += stats.get(k, 0)
-        
-    print(f"\nFinal Summary: {total_stats['processed']} processed, {total_stats['skipped_existing']} skipped, {total_stats['skipped_invalid']} invalid, {total_stats['skipped_error']} errors")
-    
+
+    print(f"\nFinal Summary: {total_stats['processed']} converted, {total_stats['copied']} copied (already GENMO), {total_stats['skipped_existing']} skipped, {total_stats['skipped_invalid']} invalid, {total_stats['skipped_error']} errors")
+
     if total_stats['processed'] > 0:
         verify_conversion(base_input, base_output)
 
