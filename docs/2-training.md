@@ -56,6 +56,25 @@ python -m scripts.render_global_vae_translation \
 
 ---
 
+## 🧍 Global VAE — root translation for the body pipeline
+
+The body (upper/lower/hand) motion representation carries no absolute root translation, so a small
+**Global VAE** recovers it from the lower-body pose: it predicts the root *local velocity* and
+integrates it (using the pelvis orientation) into world-frame translation. The body inference scripts
+load it automatically from `model_files/pretrained_cpt/VAE_Global_from_Lower54/last.ckpt`.
+
+The released checkpoint is trained **from scratch on BEAT2 + AMASS** (velocity-only). To reproduce it:
+
+```bash
+# set the BEAT2 / AMASS roots in configs/assets.yaml first
+python -m training.train_tokenizer --cfg configs/config_global_vae_beat2amass.yaml --nodebug
+```
+
+It trains the lower-body → root-velocity VAE for ~1000 epochs (cosine schedule) on the BEAT2 + AMASS
+lower-body parts; the resulting `last.ckpt` is the released Global VAE checkpoint above.
+
+---
+
 ## Stage 2 — SLB Model Training (LLM Expert)
 
 <details>
