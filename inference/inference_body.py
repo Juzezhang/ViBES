@@ -172,8 +172,7 @@ RENDER_CAMERA_Y_OFFSET = -1.2  # Camera Y translation (more negative moves view 
 # VAE model paths
 VAE_CHECKPOINT_MAIN = './model_files/pretrained_cpt/body/lom_vq.ckpt'
 VAE_CHECKPOINT_FACE = os.path.join(CONVERSATIONAL_AGENT_DIR, 'model_files/pretrained_cpt/face/face.ckpt')
-# VAE_CHECKPOINT_GLOBAL = os.path.join(CONVERSATIONAL_AGENT_DIR, 'model_files/pretrained_cpt/lom_vq_ds_new/global_25/epoch=659.pth')
-VAE_CHECKPOINT_GLOBAL = './experiments/multimodal_tokenizer/VAE_Global_from_Lower54/checkpoints/last.ckpt'
+VAE_CHECKPOINT_GLOBAL = './model_files/pretrained_cpt/VAE_Global_from_Lower54/last.ckpt'
 # SMPLX model path
 SMPLX_MODEL_DIR = os.environ.get(
     'VIBES_SMPLX_MODEL_DIR',
@@ -221,7 +220,8 @@ def generate_motion_from_text(
     output_filename="response.mp4",
     max_new_tokens=1024,
     temperature=0.0,
-    top_p=0.1
+    top_p=0.1,
+    global_checkpoint=None
 ):
     """Generate motion and audio from text prompt using the trained model.
     
@@ -243,7 +243,9 @@ def generate_motion_from_text(
         max_new_tokens: Maximum number of tokens to generate
         temperature: Sampling temperature (0.0 = deterministic)
         top_p: Top-p (nucleus) sampling parameter
-        
+        global_checkpoint: Optional override for the Global VAE checkpoint
+            (lower-body pose -> root translation); defaults to VAE_CHECKPOINT_GLOBAL.
+
     Returns:
         bool: True if generation succeeded
     """
@@ -253,11 +255,13 @@ def generate_motion_from_text(
     smplx_2020 = load_smplx_model(SMPLX_MODEL_DIR, device)
 
     # Load VAE models for different body parts
+    global_ckpt = global_checkpoint or VAE_CHECKPOINT_GLOBAL
+    print(f"  Global VAE checkpoint: {global_ckpt}")
     vae_face, vae_upper, vae_lower, vae_global, vae_hand = load_vae_models(
         device,
         VAE_CHECKPOINT_MAIN,
         VAE_CHECKPOINT_FACE,
-        VAE_CHECKPOINT_GLOBAL
+        global_ckpt
     )
 
     # Prepare input prompt with proper formatting
@@ -539,6 +543,13 @@ def main():
              'when --checkpoint is an Expert-1-only (motion) checkpoint. Ignored for full checkpoints.'
     )
     parser.add_argument(
+        '--global_checkpoint',
+        type=str,
+        default=None,
+        help='Optional override for the Global VAE checkpoint (lower-body pose -> root '
+             'translation). Defaults to the built-in VAE_CHECKPOINT_GLOBAL.'
+    )
+    parser.add_argument(
         '--output_dir',
         type=str,
         default="./test_output",
@@ -642,7 +653,8 @@ def main():
         output_filename=args.output_filename,
         max_new_tokens=args.max_new_tokens,
         temperature=args.temperature,
-        top_p=args.top_p
+        top_p=args.top_p,
+        global_checkpoint=args.global_checkpoint
     )
     
     print("\n=== Inference Completed Successfully ===")

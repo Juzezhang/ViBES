@@ -1,7 +1,6 @@
 """ PyTorch ChatGLM model. """
 
 import math
-import os
 import sys
 import torch
 import torch.utils.checkpoint
@@ -24,16 +23,13 @@ from transformers import PreTrainedModel, GenerationMixin
 
 from .configuration_chatglm import ChatGLMConfig
 import copy
-_FLASH_ATTN_AVAILABLE = False
-is_flash_attn_greater_or_equal_2_10 = lambda: False
 try:
     from transformers.utils import is_flash_attn_greater_or_equal_2_10, is_flash_attn_2_available
 
     if is_flash_attn_2_available():
         from flash_attn import flash_attn_func, flash_attn_varlen_func
         from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input  # noqa
-        _FLASH_ATTN_AVAILABLE = True
-except Exception:
+except:
     pass
 
 # flags required to enable jit fusion kernels
@@ -2589,11 +2585,6 @@ def _get_unpad_data(attention_mask):
 # Copied from transformers.models.llama.modeling_llama.LlamaFlashAttention2
 class FlashAttention2(CoreAttention):
     def __init__(self, *args, **kwargs):
-        if not _FLASH_ATTN_AVAILABLE:
-            raise ImportError(
-                "FlashAttention2 was requested, but flash-attn was not imported. "
-                "Set VIBES_ENABLE_FLASH_ATTN_IMPORT=1 or use attn_implementation='eager'/'sdpa'."
-            )
         super().__init__(*args, **kwargs)
         self._flash_attn_uses_top_left_mask = not is_flash_attn_greater_or_equal_2_10()
 
@@ -2695,69 +2686,6 @@ CORE_ATTENTION_CLASSES = {
     "sdpa": SdpaAttention,
     "flash_attention_2": FlashAttention2
 }
-
-
-def build_vibes_interleaved_attention_mask(
-    expert_masks: torch.Tensor,
-    query_length: Optional[int] = None,
-    key_length: Optional[int] = None,
-) -> torch.Tensor:
-    """
-    Explicit ViBES interleaved mask.
-
-    Expert 0 is text/audio and remains an independent causal stream: it can
-    attend only to previous/current expert-0 tokens. Expert 1 is AR motion:
-    it can attend to previous/current text/audio and previous/current motion.
-    The returned bool mask uses True for forbidden positions.
-    """
-    if expert_masks is None:
-        raise ValueError("expert_masks is required for mask-based interleaved attention")
-    if expert_masks.dim() != 3 or expert_masks.shape[0] < 2:
-        raise ValueError(f"expert_masks must have shape [2, batch, seq], got {tuple(expert_masks.shape)}")
-
-    expert_masks = expert_masks[:2].to(dtype=torch.bool)
-    speech_mask = expert_masks[0]
-    motion_mask = expert_masks[1]
-
-    batch_size, full_length = speech_mask.shape
-    key_length = full_length if key_length is None else key_length
-    query_length = key_length if query_length is None else query_length
-    if key_length > full_length:
-        raise ValueError(f"key_length={key_length} exceeds mask length={full_length}")
-    if query_length > key_length:
-        raise ValueError(f"query_length={query_length} exceeds key_length={key_length}")
-
-    device = expert_masks.device
-    key_positions = torch.arange(key_length, device=device)
-    query_positions = torch.arange(key_length - query_length, key_length, device=device)
-
-    key_is_speech = speech_mask[:, :key_length]
-    key_is_motion = motion_mask[:, :key_length]
-    key_is_valid = key_is_speech | key_is_motion
-
-    query_is_speech = speech_mask[:, query_positions]
-    query_is_motion = motion_mask[:, query_positions]
-    query_is_valid = query_is_speech | query_is_motion
-
-    causal = key_positions.unsqueeze(0) <= query_positions.unsqueeze(1)  # [Q, K]
-    speech_query_allowed = key_is_speech.unsqueeze(1) & causal.unsqueeze(0)
-    motion_query_allowed = (key_is_speech | key_is_motion).unsqueeze(1) & causal.unsqueeze(0)
-
-    allowed = torch.where(
-        query_is_motion.unsqueeze(-1),
-        motion_query_allowed,
-        speech_query_allowed,
-    )
-    allowed = allowed & query_is_valid.unsqueeze(-1) & key_is_valid.unsqueeze(1)
-
-    # Avoid all-masked rows for padded/non-routed query positions. These rows
-    # are discarded when compacting back to expert streams.
-    if (~query_is_valid).any():
-        safe_allowed = torch.zeros_like(allowed)
-        safe_allowed[:, :, 0] = True
-        allowed = torch.where(query_is_valid.unsqueeze(-1), allowed, safe_allowed)
-
-    return ~allowed.unsqueeze(1)
 
 
 class SelfAttention(torch.nn.Module):
@@ -3123,6 +3051,16 @@ class ModalityUntiedSelfAttention(torch.nn.Module):
             # [b, sq, np, hn] -> [b, np, sq, hn]
             query_layer, key_layer, value_layer = [k.transpose(1, 2) for k in [query_layer, key_layer, value_layer]]
 
+            # apply relative positional encoding (rotary embedding)
+            if rotary_pos_emb is not None:
+                if modality_masks_full is not None:
+                    query_layer = apply_rotary_pos_emb_batch(query_layer, rotary_pos_emb)
+                    key_layer = apply_rotary_pos_emb_batch(key_layer, rotary_pos_emb)
+                else:
+                    query_layer = apply_rotary_pos_emb_batch(query_layer, rotary_pos_emb)
+                    key_layer = apply_rotary_pos_emb_batch(key_layer, rotary_pos_emb)
+
+
             # adjust key and value for inference
             if kv_cache[i] is not None:
                 cache_k, cache_v = kv_cache[i]
@@ -3190,64 +3128,49 @@ class ModalityUntiedSelfAttention(torch.nn.Module):
             modality_masks=mask_for_mapping,
         )
 
-        if rotary_pos_emb is not None:
-            query_layer_list_restored = apply_rotary_pos_emb_batch(query_layer_list_restored, rotary_pos_emb)
-            key_layer_list_restored = apply_rotary_pos_emb_batch(key_layer_list_restored, rotary_pos_emb)
-
-        if getattr(self.config, "_attn_implementation", None) == "flash_attention_2":
-            flash_padding_mask = None
-            valid_token_mask = mask_for_mapping.any(dim=0).to(
-                dtype=torch.bool,
-                device=query_layer_list_restored.device,
-            )
-            if attention_mask is not None and attention_mask.dim() == 2:
-                candidate_padding_mask = attention_mask.to(dtype=torch.bool, device=query_layer_list_restored.device)
-                candidate_padding_mask = candidate_padding_mask & valid_token_mask
-            else:
-                candidate_padding_mask = valid_token_mask
-            if not bool(candidate_padding_mask.all()):
-                flash_padding_mask = candidate_padding_mask
-
-            full_causal_context = self.core_attention(
-                query_layer_list_restored,
-                key_layer_list_restored,
-                value_layer_list_restored,
-                flash_padding_mask,
-            )
-            context_layer = torch.zeros_like(full_causal_context)
-
-            for batch_idx in range(batch_size):
-                speech_mask = mask_for_mapping[0, batch_idx]
-                if speech_mask.any():
-                    speech_context = self.core_attention(
-                        query_layer_list_restored[batch_idx:batch_idx + 1, :, speech_mask],
-                        key_layer_list_restored[batch_idx:batch_idx + 1, :, speech_mask],
-                        value_layer_list_restored[batch_idx:batch_idx + 1, :, speech_mask],
+        context_layer_cache = []
+        for batch_idx in range(batch_size):
+            if mask_for_mapping[0, batch_idx].sum() != 0:
+                context_layer_cache.append(
+                    self.core_attention(
+                        query_layer_list_restored[batch_idx:batch_idx + 1, :, mask_for_mapping[0, batch_idx]],
+                        key_layer_list_restored[batch_idx:batch_idx + 1, :, mask_for_mapping[0, batch_idx]],
+                        value_layer_list_restored[batch_idx:batch_idx + 1, :, mask_for_mapping[0, batch_idx]],
                         None,
                     )
-                    context_layer[batch_idx, speech_mask] = speech_context.squeeze(0)
+                )
+            else:
+                context_layer_cache.append([])
 
-                motion_mask = mask_for_mapping[1, batch_idx]
-                if motion_mask.any():
-                    context_layer[batch_idx, motion_mask] = full_causal_context[batch_idx, motion_mask]
-        else:
-            interleaved_attention_mask = build_vibes_interleaved_attention_mask(
-                mask_for_mapping,
-                query_length=query_layer_list_restored.shape[2],
-                key_length=key_layer_list_restored.shape[2],
-            )
-            context_layer = self.core_attention(
+        context_layer = torch.zeros(
+            batch_size, n_heads, mask_for_mapping.shape[-1], query_layer_list_restored.shape[-1],
+            device=query_layer_list_restored.device,
+            dtype=query_layer_list_restored.dtype,
+        )
+
+        if mask_for_mapping[1].sum() != 0:
+            context_layer_rest = self.core_attention(
                 query_layer_list_restored,
                 key_layer_list_restored,
                 value_layer_list_restored,
-                interleaved_attention_mask,
+                None,
             )
+            for batch_idx in range(batch_size):
+                mask_rest = mask_for_mapping[1, batch_idx]
+                tokens_rest = int(mask_rest.sum().item())
+                if tokens_rest > 0:
+                    context_layer[batch_idx, :, mask_rest] = context_layer_rest[batch_idx, :, :tokens_rest, :]
+
+        for batch_idx, cache_entry in enumerate(context_layer_cache):
+            mask_primary = mask_for_mapping[0, batch_idx]
+            tokens_primary = int(mask_primary.sum().item())
+            if tokens_primary > 0 and isinstance(cache_entry, torch.Tensor):
+                context_layer[batch_idx, :, mask_primary] = cache_entry.squeeze(0)
 
         context_layer_batches = self.batch_processor.create_batch_aware_modality_data(context_layer, mask_for_mapping)
 
         output = []
-        for modality_idx in range(self.n_modalities):
-            batch_entry = context_layer_batches.get(modality_idx, [])
+        for modality_idx, batch_entry in enumerate(context_layer_batches):
             if batch_entry != []:
                 output.append(self.dense[modality_idx](batch_entry['tokens']))
             else:
@@ -4108,7 +4031,7 @@ class GLMBlockMot(torch.nn.Module):
         """
         # Layer norm at the beginning of the transformer layer
         if hidden_states[0] != []:
-            if hidden_states[0].shape[1] == 1 and modality_masks is not None and modality_masks.shape[-1] == 1:
+            if hidden_states[0].shape[1] == 1:
                 modality_masks = modality_masks[:, :, :1]
         layernorm_output = []
         for i in range(len(hidden_states)):
@@ -4119,7 +4042,7 @@ class GLMBlockMot(torch.nn.Module):
                 layernorm_output.append([])
 
         # Self attention.
-        attention_output, kv_cache = self.self_attention(
+        attention_output, kv_cache = self.self_attention.forward_second_expert_with_cached_kv(
             layernorm_output,
             attention_mask,
             rotary_pos_emb,
@@ -4749,7 +4672,7 @@ class GLMTransformerMot(torch.nn.Module):
         # Final layer norm.
         if self.post_layer_norm:
             if hidden_states[0] != []:
-                if hidden_states[0].shape[1] == 1 and modality_masks is not None and modality_masks.shape[-1] == 1:
+                if hidden_states[0].shape[1] == 1:
                     modality_masks = modality_masks[:, :, :1]
             merged_output = []
             for i in range(len(hidden_states)):
@@ -6014,22 +5937,6 @@ class ChatGLMForConditionalGenerationMotExpertNum2(ChatGLMPreTrainedModel, Gener
         use_cache = use_cache if use_cache is not None else self.config.use_cache
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        train_attention_mode = os.environ.get("VIBES_TRAIN_ATTENTION_MODE", "mask")
-        if labels is not None and train_attention_mode in ("mask", "masked_interleaved", "mask_full"):
-            return self.forward_masked_interleaved(
-                input_ids=input_ids,
-                position_ids=position_ids,
-                attention_mask=attention_mask,
-                inputs_embeds=inputs_embeds,
-                labels=labels,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
-                return_last_logit=return_last_logit,
-                modality_masks=modality_masks,
-                position_encoding_indices=position_encoding_indices,
-            )
-
         # raw_modality_masks = modality_masks
 
         expert_batches, expert_masks = self.batch_processor.create_batch_aware_expert_inputs_labels(
@@ -6664,79 +6571,6 @@ class ChatGLMForConditionalGenerationMotExpertNum2(ChatGLMPreTrainedModel, Gener
         )
 
 
-    def forward_masked_interleaved(
-            self,
-            input_ids: Optional[torch.Tensor] = None,
-            position_ids: Optional[torch.Tensor] = None,
-            attention_mask: Optional[torch.Tensor] = None,
-            inputs_embeds: Optional[torch.Tensor] = None,
-            labels: Optional[torch.Tensor] = None,
-            output_attentions: Optional[bool] = None,
-            output_hidden_states: Optional[bool] = None,
-            return_dict: Optional[bool] = None,
-            return_last_logit: Optional[bool] = False,
-            modality_masks: Optional[torch.Tensor] = None,
-            position_encoding_indices: Optional[torch.Tensor] = None,
-    ):
-        """
-        Full-prefix interleaved forward using an explicit ViBES attention mask.
-
-        This path keeps expert0/expert1 parameters unchanged; only the attention
-        visibility is expressed as a mask over the restored joint sequence.
-        """
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
-        expert_batches, _ = self.batch_processor.create_batch_aware_expert_inputs_labels(
-            input_ids, labels, position_encoding_indices, modality_masks
-        )
-
-        transformer_outputs = self.transformer(
-            input_ids=input_ids,
-            modality_batches=expert_batches,
-            position_ids=position_ids,
-            attention_mask=attention_mask,
-            past_key_values=None,
-            inputs_embeds=inputs_embeds,
-            use_cache=False,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-            modality_masks=modality_masks,
-            position_encoding_indices=position_encoding_indices,
-        )
-
-        hidden_states = transformer_outputs[0]
-        motion_hidden_states = None
-        if isinstance(hidden_states, (list, tuple)) and len(hidden_states) > 1:
-            motion_hidden_states = hidden_states[1]
-        if motion_hidden_states is None or (isinstance(motion_hidden_states, list) and motion_hidden_states == []):
-            raise ValueError("Masked interleaved forward requires at least one motion token")
-
-        final_output = self.transformer.output_layer[1](motion_hidden_states)
-        lm_logits = final_output[:, -1:] if return_last_logit else final_output
-
-        loss = None
-        if labels is not None:
-            lm_logits_for_loss = final_output.to(torch.float32)
-            labels_motion = expert_batches[1]['labels']
-            shift_logits = lm_logits_for_loss[..., :-1, :].contiguous()
-            shift_labels = labels_motion[..., 1:].contiguous()
-            loss_fct = CrossEntropyLoss(ignore_index=-100)
-            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-            loss = loss.to(final_output.dtype)
-
-        if not return_dict:
-            output = (lm_logits,) + transformer_outputs[1:]
-            return ((loss,) + output) if loss is not None else output
-
-        return CausalLMOutputWithPast(
-            loss=loss,
-            logits=lm_logits,
-            past_key_values=None,
-            hidden_states=transformer_outputs.hidden_states,
-            attentions=transformer_outputs.attentions,
-        )
-
-
     def forward_first_expert(
             self,
             input_ids: Optional[torch.Tensor] = None,
@@ -7239,7 +7073,7 @@ class ChatGLMForConditionalGenerationMotExpertNum2(ChatGLMPreTrainedModel, Gener
 
             # Concatenate with previous tokens
             if input_ids[0, seq_index] == 0:
-                input_ids[:, seq_index] = next_tokens
+                input_ids[:, seq_index] = next_tokens.unsqueeze(1)
             else:
                 pass
 
@@ -7264,98 +7098,6 @@ class ChatGLMForConditionalGenerationMotExpertNum2(ChatGLMPreTrainedModel, Gener
             # # Check if all sequences are finished
             #     break
 
-
-        return input_ids, modality_masks
-
-
-    @torch.no_grad()
-    def generate_second_expert_masked(
-        self,
-        input_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        max_new_tokens: int = 1024,
-        do_sample: bool = True,
-        temperature: float = 0.2,
-        top_p: float = 0.8,
-        top_k: Optional[int] = None,
-        repetition_penalty: float = 1.0,
-        eos_token_id: Optional[int] = None,
-        pad_token_id: Optional[int] = None,
-        modality_masks: Optional[torch.Tensor] = None,
-        position_encoding_indices: Optional[torch.Tensor] = None,
-        body_part: Optional[str] = None,
-        generation_start_idx: Optional[int] = None,
-        **kwargs,
-    ):
-        """
-        Generate motion with full-prefix explicit interleaved attention masks.
-
-        Expert0 is not re-trained or structurally changed. At each motion step
-        we recompute the prefix with the mask:
-          - text/audio queries see only causal text/audio;
-          - motion queries see causal text/audio + causal motion.
-        """
-        device = input_ids.device
-        batch_size = input_ids.shape[0]
-
-        motion_mask = modality_masks[2:, 0].any(dim=0)
-        if generation_start_idx is not None:
-            idxs = generation_start_idx
-        else:
-            motion_positions = torch.nonzero(motion_mask, as_tuple=False).view(-1)
-            if motion_positions.numel() == 0:
-                return input_ids, modality_masks
-            idxs = int(motion_positions[0].item()) + 1
-
-        seq_len = input_ids.shape[1]
-        for seq_index in range(idxs, seq_len):
-            current_is_motion = bool(modality_masks[2:, 0, seq_index].any().item())
-            if not current_is_motion:
-                continue
-            if input_ids[0, seq_index].item() != 0:
-                continue
-
-            prefix_input_ids = input_ids[:, :seq_index]
-            outputs = self.forward_masked_interleaved(
-                input_ids=prefix_input_ids,
-                attention_mask=attention_mask[:, :seq_index] if attention_mask is not None else None,
-                output_hidden_states=False,
-                return_dict=True,
-                return_last_logit=True,
-                modality_masks=modality_masks[:, :, :seq_index],
-                position_encoding_indices=position_encoding_indices[:, :seq_index],
-            )
-            next_token_logits = outputs.logits[:, -1, :]
-
-            if repetition_penalty != 1.0:
-                for i in range(batch_size):
-                    for token_id in set(prefix_input_ids[i].tolist()):
-                        if token_id != pad_token_id:
-                            next_token_logits[i, token_id] /= repetition_penalty
-
-            if do_sample and temperature > 0:
-                next_token_logits = next_token_logits / temperature
-
-            if do_sample:
-                if top_k is not None and top_k > 0:
-                    indices_to_remove = next_token_logits < torch.topk(next_token_logits, top_k)[0][..., -1, None]
-                    next_token_logits[indices_to_remove] = -float('Inf')
-
-                if top_p < 1.0:
-                    sorted_logits, sorted_indices = torch.sort(next_token_logits, descending=True)
-                    cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
-                    sorted_indices_to_remove = cumulative_probs > top_p
-                    sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
-                    sorted_indices_to_remove[..., 0] = 0
-                    indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
-                    next_token_logits[indices_to_remove] = -float('Inf')
-
-                probs = F.softmax(next_token_logits, dim=-1)
-                next_tokens = torch.multinomial(probs, num_samples=1).squeeze(1)
-            else:
-                next_tokens = torch.argmax(next_token_logits, dim=-1)
-
-            input_ids[:, seq_index] = next_tokens
 
         return input_ids, modality_masks
 
@@ -7570,7 +7312,6 @@ class ChatGLMForConditionalGenerationMotExpertNum2(ChatGLMPreTrainedModel, Gener
             Generated token ids [batch_size, seq_length + generated_length]
         """
         # Set default values
-        generation_mode = kwargs.pop("generation_mode", None) or os.environ.get("VIBES_ATTENTION_MODE", "mask")
         if eos_token_id is None:
             eos_token_id = self.config.eos_token_id
         if pad_token_id is None:
@@ -7630,10 +7371,6 @@ class ChatGLMForConditionalGenerationMotExpertNum2(ChatGLMPreTrainedModel, Gener
             position_encoding_indices = calculate_position_encoding_indices(first_modality_masks_with_body, modality_fps={1: 12.5, 2: 6.25})
         elif body_part == "face_body":
             first_modality_input_ids_with_body, first_modality_masks_with_body = self.add_face_body_tokens_to_output(first_modality_input_ids, first_modality_masks)
-            # face_body currently packs one unified motion stream per audio chunk:
-            # 1 begin token + 91 regular motion tokens over 26 audio tokens.
-            motion_fps = 91 / (26 / 12.5)
-            position_encoding_indices = calculate_position_encoding_indices(first_modality_masks_with_body, modality_fps={1: 12.5, 2: motion_fps})
         else:
             raise ValueError(f"Invalid body part: {body_part}")
 
@@ -7642,64 +7379,26 @@ class ChatGLMForConditionalGenerationMotExpertNum2(ChatGLMPreTrainedModel, Gener
         attention_mask = torch.ones(first_modality_input_ids_with_body.shape[0], first_modality_input_ids_with_body.shape[1], dtype=torch.int64, device=first_modality_input_ids_with_body.device)
 
 
-        if generation_mode == "legacy_cache":
-            print("Generating with second modality using cached KV...")
-            second_modality_input_ids, second_modality_masks = self.generate_second_expert(
-                input_ids=first_modality_input_ids_with_body,
-                attention_mask=attention_mask,
-                max_new_tokens=max_new_tokens,
-                do_sample=do_sample,
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-                repetition_penalty=repetition_penalty,
-                eos_token_id=eos_token_id,
-                pad_token_id=pad_token_id,
-                modality_masks=first_modality_masks_with_body,
-                position_encoding_indices=position_encoding_indices,
-                past_key_values=first_modality_cache,
-                body_part=body_part,
-                **kwargs
-            )
-        elif generation_mode in ("mask", "masked_interleaved", "mask_cache", "masked_cached"):
-            print("Generating with second modality using cached KV fast path (use generation_mode='mask_full' for explicit full-prefix mask)...")
-            second_modality_input_ids, second_modality_masks = self.generate_second_expert(
-                input_ids=first_modality_input_ids_with_body,
-                attention_mask=attention_mask,
-                max_new_tokens=max_new_tokens,
-                do_sample=do_sample,
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-                repetition_penalty=repetition_penalty,
-                eos_token_id=eos_token_id,
-                pad_token_id=pad_token_id,
-                modality_masks=first_modality_masks_with_body,
-                position_encoding_indices=position_encoding_indices,
-                past_key_values=first_modality_cache,
-                body_part=body_part,
-                **kwargs
-            )
-        elif generation_mode in ("mask_full", "masked_full", "debug_full_mask"):
-            print("Generating with second modality using full-prefix explicit interleaved attention mask...")
-            second_modality_input_ids, second_modality_masks = self.generate_second_expert_masked(
-                input_ids=first_modality_input_ids_with_body,
-                attention_mask=attention_mask,
-                max_new_tokens=max_new_tokens,
-                do_sample=do_sample,
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-                repetition_penalty=repetition_penalty,
-                eos_token_id=eos_token_id,
-                pad_token_id=pad_token_id,
-                modality_masks=first_modality_masks_with_body,
-                position_encoding_indices=position_encoding_indices,
-                body_part=body_part,
-                **kwargs
-            )
-        else:
-            raise ValueError(f"Invalid generation_mode: {generation_mode}")
+        # Step 2: Generate using second modality with cached KV from first modality
+        print("Generating with second modality using cached KV...")
+
+        second_modality_input_ids, second_modality_masks = self.generate_second_expert(
+            input_ids=first_modality_input_ids_with_body,
+            attention_mask=attention_mask,
+            max_new_tokens=max_new_tokens,
+            do_sample=do_sample,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            repetition_penalty=repetition_penalty,
+            eos_token_id=eos_token_id,
+            pad_token_id=pad_token_id,
+            modality_masks=first_modality_masks_with_body,
+            position_encoding_indices=position_encoding_indices,
+            past_key_values=first_modality_cache,
+            body_part=body_part,
+            **kwargs
+        )
 
         # Return the final results from second modality generation
         return second_modality_input_ids, second_modality_masks

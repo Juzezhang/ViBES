@@ -111,6 +111,17 @@ def main():
     if cfg.Selected_part != "global":
         raise ValueError("render_global_vae_translation expects Selected_part == 'global'")
 
+    # Runtime overrides (env) — keep real/scrubbed paths out of the repo.
+    if os.environ.get("VIBES_BEAT2_ROOT"):
+        cfg.DATASET.BEAT2.ROOT = os.environ["VIBES_BEAT2_ROOT"]
+    if os.environ.get("VIBES_AMASS_ROOT"):
+        cfg.DATASET.AMASS.ROOT = os.environ["VIBES_AMASS_ROOT"]
+    if os.environ.get("VIBES_EVAL_MODALITIES"):
+        mods = [m.strip() for m in os.environ["VIBES_EVAL_MODALITIES"].split(",") if m.strip()]
+        cfg.DATASET.MODALITIES = {m: ["lower"] for m in mods}
+    if os.environ.get("VIBES_GLOBAL_CKPT"):
+        cfg.TEST.CHECKPOINTS = os.environ["VIBES_GLOBAL_CKPT"]
+
     render_cfg = OmegaConf.select(cfg, "TEST.RENDER")
     splits = render_cfg.SPLITS if render_cfg and "SPLITS" in render_cfg else ["test"]
     num_samples = render_cfg.NUM_SAMPLES_PER_SPLIT if render_cfg and "NUM_SAMPLES_PER_SPLIT" in render_cfg else 5

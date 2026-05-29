@@ -91,7 +91,6 @@ import numpy as np
 from tqdm import tqdm
 from transformers import (
     AutoTokenizer,
-    AutoModel,
     AutoConfig
 )
 from transformers.modeling_utils import load_sharded_checkpoint
@@ -112,6 +111,7 @@ sys.path.insert(0, ROOT_DIR)
 # Per-expert checkpoint loading (Expert-1-only checkpoints + GLM-base reconstruction of Expert-0)
 sys.path.insert(0, os.path.join(ROOT_DIR, "training"))
 from expert_io import is_expert1_checkpoint, load_expert1_checkpoint
+from vibes.modeling_chatglm import ChatGLMForConditionalGenerationMotExpertNum2
 
 # Import conver_agent modules (after path setup)
 from multimodal_tokenizers.archs.lom_vq import VQVAEConvZeroDSUS1_PaperVersion
@@ -328,7 +328,9 @@ def generate_face_from_text(
     output_filename="response.mp4",
     max_new_tokens=1024,
     temperature=0.2,
-    top_p=0.8
+    top_p=0.8,
+    do_sample=True,
+    generation_mode="mask",
 ):
     """
     Generate face motion and audio from text prompt using the trained model.
@@ -381,13 +383,14 @@ def generate_face_from_text(
             input_ids=inputs.input_ids,
             attention_mask=inputs.attention_mask,
             max_new_tokens=max_new_tokens,
-            do_sample=True,
+            do_sample=do_sample,
             temperature=temperature,
             top_p=top_p,
             modality_masks=modality_masks_original,
             use_cache=True,
             position_encoding_indices=position_encoding_indices,
-            body_part="face"
+            body_part="face",
+            generation_mode=generation_mode,
         )
 
     # Apply face token offset to correct token IDs
@@ -546,6 +549,13 @@ def main():
              'when --checkpoint is an Expert-1-only (motion) checkpoint. Ignored for full checkpoints.'
     )
     parser.add_argument(
+        '--vibes_config',
+        type=str,
+        default=None,
+        help='MoME config+tokenizer dir (defaults to ./vibes, the 9B backbone). Set to vibes_0.5b '
+             '(with --glm_base_path pointing at ViBES-Audio) to run the 0.5B variant.'
+    )
+    parser.add_argument(
         '--output_dir',
         type=str,
         default="./test_output",
@@ -588,6 +598,40 @@ def main():
         default=0.8,
         help='Top-p (nucleus) sampling parameter (0.0-1.0)'
     )
+    parser.add_argument(
+        '--generation_mode',
+        type=str,
+        default="mask",
+        choices=[
+            "mask",
+            "masked_interleaved",
+            "mask_cache",
+            "masked_cached",
+            "mask_full",
+            "masked_full",
+            "debug_full_mask",
+            "legacy_cache",
+        ],
+        help='Second-expert generation path. mask/mask_cache use KV cache; mask_full uses slow explicit full-prefix masks.'
+    )
+    parser.add_argument(
+        '--attn_implementation',
+        type=str,
+        default="flash_attention_2",
+        choices=["eager", "sdpa", "flash_attention_2"],
+        help='Attention backend. The mask generation path is flash-attn compatible by default.'
+    )
+    parser.add_argument(
+        '--greedy',
+        action='store_true',
+        help='Disable sampling for deterministic comparison'
+    )
+    parser.add_argument(
+        '--seed',
+        type=int,
+        default=42,
+        help='Random seed used when sampling is enabled'
+    )
     args = parser.parse_args()
     
     # Validate checkpoint path
@@ -605,22 +649,22 @@ def main():
     else:
         device = "cuda:0" if args.device == "cuda" else "cpu"
     print(f"Using device: {device}")
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+    if device.startswith("cuda"):
+        torch.cuda.manual_seed_all(args.seed)
     
     # Load tokenizer
     print("\n=== Step 1: Load Tokenizer ===")
-    tokenizer_path = os.path.join(ROOT_DIR, "vibes")
+    tokenizer_path = args.vibes_config or os.path.join(ROOT_DIR, "vibes")
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
 
     # Load model configuration and create model instance
     print("\n=== Step 2: Load Base Model ===")
     config = AutoConfig.from_pretrained(tokenizer_path, trust_remote_code=True)
-    
-    base_model = AutoModel.from_config(
-        config,
-        trust_remote_code=True,
-        torch_dtype=torch.bfloat16 if device.startswith("cuda") else torch.float32,
-        attn_implementation="flash_attention_2",
-    ).to(device)
+    config.torch_dtype = torch.bfloat16 if device.startswith("cuda") else torch.float32
+    config._attn_implementation = args.attn_implementation
+    base_model = ChatGLMForConditionalGenerationMotExpertNum2(config, empty_init=True, device=device).to(device)
 
     # Load model weights from checkpoint.
     # Expert-1-only checkpoints (marked with expert_checkpoint.json) store just the trained
@@ -649,7 +693,9 @@ def main():
         output_filename=args.output_filename,
         max_new_tokens=args.max_new_tokens,
         temperature=args.temperature,
-        top_p=args.top_p
+        top_p=args.top_p,
+        do_sample=not args.greedy,
+        generation_mode=args.generation_mode,
     )
     
     print("\n=== Inference Completed Successfully ===")

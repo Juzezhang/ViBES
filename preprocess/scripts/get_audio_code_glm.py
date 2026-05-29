@@ -33,6 +33,9 @@ parser.add_argument('--wav_folder', type=str, required=True,
                     help="[INPUT] Folder of .wav files (walked recursively).")
 parser.add_argument('--output_dir', type=str, required=True,
                     help="[OUTPUT] Where to write the .npy token arrays (mirrors the input folder structure).")
+parser.add_argument('--speech_tokenizer', type=str, default='THUDM/glm-4-voice-tokenizer',
+                    help="GLM-4-Voice speech tokenizer (HF id or local dir). Use a local dir for "
+                         "offline / compute-node runs.")
 args = parser.parse_args()
 
 wav_folder = args.wav_folder
@@ -41,8 +44,8 @@ output_dir = args.output_dir
 _resample_buffer: dict[int, torchaudio.transforms.Resample] = {}
 
 # Speech tokenizer
-whisper_model = WhisperVQEncoder.from_pretrained('THUDM/glm-4-voice-tokenizer').eval().to(device)
-feature_extractor = WhisperFeatureExtractor.from_pretrained('THUDM/glm-4-voice-tokenizer')
+whisper_model = WhisperVQEncoder.from_pretrained(args.speech_tokenizer).eval().to(device)
+feature_extractor = WhisperFeatureExtractor.from_pretrained(args.speech_tokenizer)
 
 def extract_speech_token(model: WhisperVQEncoder, feature_extractor: WhisperFeatureExtractor, utts):
     with torch.no_grad():

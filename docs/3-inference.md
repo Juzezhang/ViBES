@@ -40,6 +40,91 @@ Output: `<output_dir>/<timestamp>/result.mp4` plus intermediate token / audio fi
 
 ---
 
+## Body Inference
+
+> 🚧 **Status: draft for the upcoming body release.** The face expert is fully released; the body
+> expert is being finalized (see the [TODO list](../README.md#-todo-list)). This section documents the
+> body inference variants so they can be turned on as soon as the checkpoints are published.
+
+Body generation produces a full-body SMPL-X animation with synchronized speech from a text prompt.
+There are **four variants** — every combination of two *conditioning* modes and two *motion
+representations*. Pick the row you want in the table below and run the shared command template.
+
+- **Conditioning** — *what drives the motion:*
+  - **Cospeech** — gestures emerge from the speech the model generates from your text; there is no
+    explicit instruction about which motion to perform (audio-to-motion).
+  - **Instruction + cospeech** — the model also follows a text instruction (e.g. "wave hello") while
+    staying speech-synchronized, via the instruction system prompt (see [Conditioning prompts](#conditioning-prompts)).
+- **Representation** — *how motion tokens decode to SMPL-X:*
+  - **GENMO body+hand** — one full-body VQ-VAE (135D: 21-joint body 6D + global orient 6D + root local
+    velocity 3D); keeps **global translation stable** (the reason we adopted it). Tokenizer:
+    `model_files/pretrained_cpt/VQVAE_0320_GenmoFull/`.
+  - **Upper+Lower+Hand** — the original LOM split (separate upper/lower/hand VQ-VAEs + a global
+    branch); global translation drifts more than GENMO.
+
+### The four variants
+
+| Conditioning | Representation | Inference script | Checkpoint (`--checkpoint`) |
+|---|---|---|---|
+| Cospeech | GENMO body+hand | `inference/inference_body_fullbody_genmo.py` | `/path/to/ViBES-Body-Genmo-Cospeech` |
+| Cospeech | Upper+Lower+Hand | `inference/inference_body.py` | `/path/to/ViBES-Body-Cospeech` |
+| Instruction + cospeech | GENMO body+hand | `inference/inference_body_fullbody_genmo.py` | `/path/to/ViBES-Body-Genmo-Instruct` |
+| Instruction + cospeech | Upper+Lower+Hand | `inference/inference_body.py` | `/path/to/ViBES-Body-Instruct` |
+
+<!-- TODO(body release): replace the /path/to/ViBES-Body-* placeholders with the published HF repos.
+     Internal training runs that back these rows (private — do not commit real paths):
+       cospeech/upper+lower+hand = rotation_body_a2m_v6   instruction/upper+lower+hand = rotation_body_v6
+       GENMO = fullbody_genmo_v1 (+ upper_lower_genmo_v1 for the upper/lower GENMO split)
+     Confirm which GENMO run is cospeech vs instruction before filling the GENMO rows. -->
+
+All four share the same Stage-2 MoME backbone and the **Expert-1-only checkpoint format** (loaded
+exactly like the [face checkpoint](#face-inference-main-demo): the frozen text/audio expert is
+reconstructed from the GLM-4-Voice base via `--glm_base_path`). To run a variant, drop its **script**
+and **checkpoint** from the table into this template:
+
+```bash
+python <inference-script-from-the-table> \
+    --checkpoint <checkpoint-from-the-table> \
+    --glm_base_path ./model_files/glm-4-voice-9b \
+    --user_text "If you had a superpower for one day, what would you choose?" \
+    --output_dir ./results/body
+```
+
+For an **instruction + cospeech** checkpoint, phrase `--user_text` as the instruction itself
+(e.g. `"Wave hello, then tell me about your day."`).
+
+Output: `<output_dir>/<...>.mp4` — an SMPL-X body render muxed with synthesized speech, plus
+intermediate token / audio files.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--checkpoint` | (from table) | Stage-2 body checkpoint directory |
+| `--glm_base_path` | `THUDM/glm-4-voice-9b` | GLM-4-Voice base for reconstructing the frozen text/audio expert |
+| `--user_text` | (prompt) | Text prompt, or the motion instruction for instruction variants |
+| `--output_dir` | `./results/body` | Output directory |
+| `--device` | `cuda:0` | GPU device |
+
+> **Ablation variant:** the GENMO upper/lower split (`inference/inference_body_upper_lower_genmo.py` —
+> standard upper-body VQ-VAE + GENMO lower-body VQ-VAE) is available but is not part of the four-variant
+> release matrix.
+
+### Conditioning prompts
+
+The conditioning mode is set by the system message passed to `create_prompt`
+(`utils/inference_utils.py`):
+
+- **Cospeech only** (default) — the model is asked to respond with interleaved speech tokens; gestures
+  follow from the speech:
+
+  > User will provide you with a text instruction. Do it step by step. First, think about the
+  > instruction and respond in an interleaved manner, with 13 text tokens followed by 26 audio tokens.
+
+- **Instruction + cospeech** — the model is additionally told to *embody and perform* the requested
+  motion while speaking (first-person, "imagine you have a body and are already moving …"). Pass this
+  longer system message via `create_prompt(user_text, system_message=...)`.
+
+---
+
 ## Render Mesh NPY Files
 
 Render pre-computed mesh `.npy` files (shape `(T, V, 3)`) to MP4 videos. Auto-detects SMPL (6890 verts) vs. SMPL-X (10475 verts).
@@ -108,12 +193,6 @@ python scripts/audio_tokenize_roundtrip.py \
 - `<stem>_reconstructed.wav` — decoded audio from tokens (22050 Hz)
 - `<stem>_original_22050hz.wav` — original resampled to 22050 Hz for comparison
 - `<stem>_tokens.npy` — integer token array (if `--save_tokens`)
-
----
-
-## Body Inference
-
-> 🚧 Body inference scripts are pending release. Earlier prototypes used the LOM motion representation, but global translation was unstable under autoregressive generation. The released body pipeline will use the GENMO 145D representation — see the [TODO list](../README.md#-todo-list) for status.
 
 ---
 

@@ -12,6 +12,15 @@ ViBES is a speech-language-behavior (SLB) model with a mixture-of-modality-exper
 
 ![Teaser](./assets/teaser.png)
 
+### Model variants
+
+ViBES comes in two sizes that differ only in the speech/text backbone (the frozen Expert-0); the motion experts are the same:
+
+| Variant | Speech/text backbone (Expert-0) | Notes |
+|---|---|---|
+| **ViBES (9B)** | [GLM-4-Voice-9B](https://huggingface.co/THUDM/glm-4-voice-9b) | best quality |
+| **ViBES (0.5B)** | [ViBES-Audio](https://huggingface.co/JuzeZhang/ViBES-Audio) — our distilled 0.5B GLM-4-Voice | ~15× smaller backbone, low-latency / on-device |
+
 
 ## ✅ TODO List
 
@@ -28,6 +37,9 @@ ViBES is a speech-language-behavior (SLB) model with a mixture-of-modality-exper
 ## 🛠️ Environment Setup
 
 Requires Conda, CUDA 12.8+, and GCC 9.0+. Follow installation order carefully.
+
+<details>
+<summary><b>Show full installation steps</b></summary>
 
 ```bash
 
@@ -78,9 +90,12 @@ huggingface-cli download JuzeZhang/ViBES-Face --local-dir ./ViBES-Face
 
 For SMPL-X / FLAME body models, sign up on https://smpl-x.is.tue.mpg.de and https://flame.is.tue.mpg.de, then place the files under `model_files/smplx_models/` and `model_files/FLAME2020/` respectively.
 
+</details>
+
 
 ## 🚀 Quick Start
 
+<details open>
 <summary><b>Conversation with Text input</b></summary>
 
 ```bash
@@ -101,6 +116,26 @@ https://github.com/user-attachments/assets/cd0191fa-394d-4476-aec7-c8aed7fe1690
 
 *Example output showing conversational facial animation with synchronized audio*
 
+</details>
+
+
+## 🧍 Global VAE — root translation for the body pipeline
+
+The body (upper/lower/hand) motion representation carries no absolute root translation, so a small
+**Global VAE** recovers it from the lower-body pose: it predicts the root *local velocity* and
+integrates it (using the pelvis orientation) into world-frame translation. The body inference scripts
+load it automatically from `model_files/pretrained_cpt/VAE_Global_from_Lower54/last.ckpt`.
+
+The released checkpoint is trained **from scratch on BEAT2 + AMASS** (velocity-only). To reproduce it:
+
+```bash
+# set the BEAT2 / AMASS roots in configs/assets.yaml first
+python -m training.train_tokenizer --cfg configs/config_global_vae_beat2amass.yaml --nodebug
+```
+
+It trains the lower-body → root-velocity VAE for ~1000 epochs (cosine schedule) on the BEAT2 + AMASS
+lower-body parts; the resulting `last.ckpt` is the released Global VAE checkpoint above.
+
 
 ## 📚 Documentation
 
@@ -117,6 +152,9 @@ Full guides live under [`docs/`](docs/index.md):
 
 ## Acknowledgements
 
+<details>
+<summary><b>Projects we build on</b></summary>
+
 We thank the following projects for sharing their great work.
 - **GLM-4-Voice**: https://github.com/zai-org/GLM-4-Voice
 - **Language of Motion**: https://github.com/Juzezhang/language_of_motion
@@ -124,9 +162,16 @@ We thank the following projects for sharing their great work.
 - **FLAME**: https://flame.is.tue.mpg.de
 - **EMICA**: https://github.com/radekd91/inferno
 
+</details>
 
-## Citation
+
+## 📖 Citation
+
 If you find our work useful in your research, please consider citing:
+
+<details open>
+<summary><b>BibTeX</b></summary>
+
 ```bibtex
 @inproceedings{
       zhang2026vibes,
@@ -136,3 +181,5 @@ If you find our work useful in your research, please consider citing:
       year={2026},
 }
 ```
+
+</details>
