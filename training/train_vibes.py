@@ -1,16 +1,26 @@
 import os
-from transformers import Trainer, TrainingArguments
+import time as _time
+import sys
+
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
+from transformers import Trainer, TrainingArguments, TrainerCallback
 from transformers import (
     AutoTokenizer,
     AutoModel,
     AutoConfig
 )
+from transformers.modeling_utils import load_sharded_checkpoint
 from datasets import load_from_disk
 import torch
 import numpy as np
 import gc
 import json
 import math
+from vibes.modeling_chatglm import ChatGLMForConditionalGenerationMotExpertNum2
+from expert_io import is_expert1_checkpoint, load_expert1_checkpoint
 
 def load_tokenized_dataset(dataset_path, verbose=True):
     """
@@ -100,7 +110,7 @@ def tokenized_data_collator(batch):
         padded_modality_masks_1 = item["modality_masks_1"] + [False] * padding_len
         modality_masks_1_list.append(padded_modality_masks_1)
 
-        padded_modality_masks_2 = item["modality_masks_2"] + [True] * padding_len
+        padded_modality_masks_2 = item["modality_masks_2"] + [False] * padding_len
         modality_masks_2_list.append(padded_modality_masks_2)
 
 
@@ -420,11 +430,39 @@ if __name__ == "__main__":
                         help="Save a checkpoint every N steps")
     parser.add_argument("--save_total_limit", type=int, default=5,
                         help="Maximum number of checkpoints to keep")
+    parser.add_argument("--save_strategy", type=str, default="steps", choices=["steps", "no"],
+                        help="Checkpoint save strategy. Use 'no' for fast smoke tests.")
+    parser.add_argument("--skip_final_save", action="store_true",
+                        help="Skip final trainer.save_model(), useful for no-save smoke tests.")
     # Original model has 40 layers, we can use this to train the model with less layers
     parser.add_argument("--layer_num", type=int, default=5,
                         help="Number of layers in the model")
     parser.add_argument("--t1_layer_limit", type=int, default=None,
                         help="Number of Transformer-1 layers to execute (<= 40, defaults to layer_num)")
+    # --- efficiency knobs ---
+    # The trainable motion expert (Expert-1) is small (~0.9 GB); the frozen text/audio expert +
+    # embeddings (~19 GB) dominate. ZeRO-3 would shard AND all-gather those frozen weights every
+    # step (huge wasted comm -> low GPU util). The full model fits replicated on one 46 GB GPU, so
+    # ZeRO-2 (params replicated, only the tiny Expert-1 grads/optimizer sharded) is much faster here.
+    parser.add_argument("--zero_stage", type=int, default=2, choices=[0, 1, 2, 3],
+                        help="DeepSpeed ZeRO stage (default 2; 3 only if the model does not fit replicated)")
+    parser.add_argument("--no_gradient_checkpointing", action="store_true",
+                        help="Disable gradient checkpointing (faster; fine when the model fits without it)")
+    parser.add_argument("--max_steps", type=int, default=0,
+                        help="If >0, stop after this many optimizer steps (for benchmarking)")
+    parser.add_argument("--logging_steps", type=int, default=100,
+                        help="Log train loss every N steps (lower = more frequent loss readouts)")
+    parser.add_argument("--dataloader_num_workers", type=int, default=0,
+                        help="Dataloader workers. 0 is best for smoke tests and avoids worker startup latency.")
+    parser.add_argument("--max_train_samples", type=int, default=0,
+                        help="If >0, train on only the first N dataset rows (for smoke tests)")
+    parser.add_argument("--attn_implementation", type=str, default="flash_attention_2",
+                        choices=["flash_attention_2", "eager", "sdpa"],
+                        help="Attention backend for masked interleaved training")
+    parser.add_argument("--vibes_config", type=str, default="./vibes",
+                        help="MoME config+tokenizer dir. Default ./vibes (9B backbone). Use vibes_0.5b "
+                             "(hidden 1024 / 24 layers) with --glm_base_path <ViBES-Audio> --layer_num 24 "
+                             "for the 0.5B variant.")
     args = parser.parse_args()
     
     # Output training configuration information
@@ -439,6 +477,8 @@ if __name__ == "__main__":
     print(f"  - Local rank: {args.local_rank}")
     print(f"  - Save checkpoint every {args.save_steps} steps")
     print(f"  - Keep up to {args.save_total_limit} checkpoints")
+    print(f"  - Attention backend: {args.attn_implementation}")
+    print("  - Training attention mode: masked interleaved (override with VIBES_TRAIN_ATTENTION_MODE=legacy_cache)")
 
     # Clear memory
     gc.collect()
@@ -446,6 +486,25 @@ if __name__ == "__main__":
     print("Memory cleared")
 
     # Create DeepSpeed configuration
+    zero_opt = {
+        "stage": args.zero_stage,
+        "allgather_partitions": True,
+        "allgather_bucket_size": 5e8,
+        "reduce_scatter": True,
+        "contiguous_gradients": True,
+        "overlap_comm": True,
+        "reduce_bucket_size": "auto",
+    }
+    if args.zero_stage == 3:
+        # Stage-3 also shards parameters; these keys only apply then.
+        zero_opt.update({
+            "sub_group_size": 1e9,
+            "stage3_prefetch_bucket_size": "auto",
+            "stage3_param_persistence_threshold": "auto",
+            "stage3_max_live_parameters": 1e9,
+            "stage3_max_reuse_distance": 1e9,
+            "stage3_gather_16bit_weights_on_model_save": True,
+        })
     ds_config = {
         "train_micro_batch_size_per_gpu": "auto",
         "zero_allow_untested_optimizer": True,
@@ -458,35 +517,26 @@ if __name__ == "__main__":
                 "lr": "auto",
                 "betas": "auto",
                 "eps": "auto",
-                "weight_decay": "auto"
+                "weight_decay": "auto",
+                # Use torch's AdamW instead of DeepSpeed's FusedAdam: FusedAdam JIT-compiles a CUDA
+                # op (needs a working `ninja` executable + nvcc on the compute node), which the
+                # relocated conda env can't do reliably. The trainable expert is tiny (~0.9 GB), so
+                # the fused-vs-torch optimizer speed difference is negligible.
+                "torch_adam": True
             }
         },
-        "zero_optimization": {
-            "stage": 3,
-            "allgather_partitions": True,
-            "allgather_bucket_size": 5e8,
-            "reduce_scatter": True,
-            "contiguous_gradients": True,
-            "overlap_comm": True,
-            "sub_group_size": 1e9,
-            "reduce_bucket_size": "auto",
-            "stage3_prefetch_bucket_size": "auto",
-            "stage3_param_persistence_threshold": "auto",
-            "stage3_max_live_parameters": 1e9,
-            "stage3_max_reuse_distance": 1e9,
-            "stage3_gather_16bit_weights_on_model_save": True
-        }
+        "zero_optimization": zero_opt
     }
 
     # Save configuration to file
     with open('ds_config.json', 'w') as f:
         json.dump(ds_config, f, indent=4)
 
-    print("Created DeepSpeed configuration (ZeRO Stage-3)")
+    print(f"Created DeepSpeed configuration (ZeRO Stage-{args.zero_stage})")
 
     # Initialize tokenizer
     tokenizer = AutoTokenizer.from_pretrained(
-        "THUDM/glm-4-voice-9b", 
+        args.vibes_config,
         trust_remote_code=True
     )
     # Ensure pad token is set
@@ -499,7 +549,7 @@ if __name__ == "__main__":
     # Add special tokens for face, upper body, and lower body modalities
     # Load tokenizer
     print("\n=== Step 1: Load Tokenizer ===")
-    tokenizer_path = "./vibes"
+    tokenizer_path = args.vibes_config
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
 
     ## tokenizer.convert_tokens_to_ids("<|face_10|>")
@@ -512,22 +562,30 @@ if __name__ == "__main__":
     # Load model using AutoModel with trust_remote_code
     # The model directory should contain modeling_chatglm.py with the dual-transformer class
     if args.pretrained_model_path:
-        language_model = AutoModel.from_pretrained(
-            args.pretrained_model_path,
-            torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
-        )
+        print("\n=== Step 2: Load Model From Pretrained Checkpoint ===")
+        config = AutoConfig.from_pretrained(tokenizer_path, trust_remote_code=True)
+        config.num_layers = args.layer_num
+        config.torch_dtype = torch.bfloat16
+        config._attn_implementation = args.attn_implementation
+        language_model = ChatGLMForConditionalGenerationMotExpertNum2(config, empty_init=True, device="cpu")
+        language_model = language_model.to(dtype=torch.bfloat16)
+        if is_expert1_checkpoint(args.pretrained_model_path):
+            print(f"Detected Expert-1-only checkpoint; reconstructing Expert-0 from {args.glm_base_path}")
+            _, missing, unexpected = load_expert1_checkpoint(language_model, args.pretrained_model_path, args.glm_base_path)
+            unexpected = [k for k in unexpected if "rotary_pos_emb" not in k]
+            if unexpected:
+                print(f"Warning: {len(unexpected)} unexpected keys, e.g. {unexpected[:3]}")
+        else:
+            load_sharded_checkpoint(language_model, args.pretrained_model_path)
     else:
         # Load model configuration and create model instance
         print("\n=== Step 2: Load Base Model ===")
         config = AutoConfig.from_pretrained(tokenizer_path, trust_remote_code=True)
         config.num_layers = args.layer_num
-        language_model = AutoModel.from_config(
-            config,
-            trust_remote_code=True,
-            torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
-        )
+        config.torch_dtype = torch.bfloat16
+        config._attn_implementation = args.attn_implementation
+        language_model = ChatGLMForConditionalGenerationMotExpertNum2(config, empty_init=True, device="cpu")
+        language_model = language_model.to(dtype=torch.bfloat16)
 
 
         # if args.layer_num == 40:
@@ -642,6 +700,10 @@ if __name__ == "__main__":
 
     print(f"Using tokenized dataset: {tokenized_dataset_path}")
     dataset = load_tokenized_dataset(tokenized_dataset_path)
+    if args.max_train_samples and args.max_train_samples > 0:
+        n = min(args.max_train_samples, len(dataset))
+        dataset = dataset.select(range(n))
+        print(f"Selected first {n} samples for smoke training")
     data_collator = tokenized_data_collator
     print("Using tokenized data collator")
 
@@ -650,12 +712,13 @@ if __name__ == "__main__":
         output_dir=args.output_dir,
         per_device_train_batch_size=args.batch_size,
         gradient_accumulation_steps=1,
-        gradient_checkpointing=True,
+        gradient_checkpointing=not args.no_gradient_checkpointing,
         # evaluation_strategy="no",
-        save_strategy="steps",
+        max_steps=args.max_steps if args.max_steps and args.max_steps > 0 else -1,
+        save_strategy=args.save_strategy,
         save_steps=args.save_steps,
         logging_strategy="steps",
-        logging_steps=100,
+        logging_steps=args.logging_steps,
         save_total_limit=args.save_total_limit,
         num_train_epochs=args.epochs,
         learning_rate=args.learning_rate,
@@ -665,7 +728,7 @@ if __name__ == "__main__":
         bf16=True,
         report_to="none",
         remove_unused_columns=False,
-        dataloader_num_workers=8,
+        dataloader_num_workers=args.dataloader_num_workers,
         dataloader_pin_memory=True,
         deepspeed="ds_config.json",
         # deepspeed_port=29505,  # change this port to avoid conflict
@@ -685,6 +748,27 @@ if __name__ == "__main__":
         data_collator=data_collator,
     )
 
+    # Benchmark instrumentation: when VIBES_BENCH_TIMING is set, record per-step wall time so a
+    # downstream harness can compute steady-state throughput (warmup excluded). No-op otherwise.
+    if os.environ.get("VIBES_BENCH_TIMING"):
+        class _BenchTimingCallback(TrainerCallback):
+            def __init__(self, path, world_size, micro_bs):
+                self.path, self.world, self.bs = path, world_size, micro_bs
+                self._t = None
+                self.f = open(path, "w"); self.f.write("step,step_time_s,samples\n"); self.f.flush()
+            def on_step_begin(self, a, s, c, **kw):
+                if torch.cuda.is_available(): torch.cuda.synchronize()
+                self._t = _time.perf_counter()
+            def on_step_end(self, a, s, c, **kw):
+                if self._t is None: return
+                if torch.cuda.is_available(): torch.cuda.synchronize()
+                dt = _time.perf_counter() - self._t
+                self.f.write(f"{s.global_step},{dt:.5f},{self.world * self.bs}\n"); self.f.flush()
+        ws = int(os.environ.get("WORLD_SIZE", "1"))
+        if int(os.environ.get("LOCAL_RANK", "0")) == 0:
+            trainer.add_callback(_BenchTimingCallback(
+                os.environ["VIBES_BENCH_TIMING"], ws, args.batch_size))
+
     # Start training
     if args.resume_from_checkpoint:
         print(f"Resuming training from checkpoint: {args.resume_from_checkpoint}")
@@ -693,6 +777,9 @@ if __name__ == "__main__":
         trainer.train()
 
     # Save model
-    final_model_path = os.path.join(args.output_dir, "final_model")
-    trainer.save_model(final_model_path)
-    print(f"Training completed, model saved to: {final_model_path}")
+    if args.skip_final_save:
+        print("Training completed, final model save skipped by --skip_final_save")
+    else:
+        final_model_path = os.path.join(args.output_dir, "final_model")
+        trainer.save_model(final_model_path)
+        print(f"Training completed, model saved to: {final_model_path}")

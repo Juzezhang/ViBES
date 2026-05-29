@@ -8,6 +8,9 @@ ViBES is trained in **two stages**: (1) train per-part VQ-VAE tokenizers, then (
 
 ## Stage 1 — Tokenizer Training
 
+<details>
+<summary><b>Show Stage 1 tokenizer training commands</b></summary>
+
 VQ-VAE tokenizers convert continuous SMPL-X motion into discrete codes. Each part (face / upper / lower / hand / full body) is trained with its own config. All entry points live under `training/train_tokenizer.py`; pass `--nodebug` to actually log and checkpoint (the script defaults to `DEBUG=True` for safety during development).
 
 **Face tokenizer:**
@@ -49,9 +52,14 @@ python -m scripts.render_global_vae_translation \
     --cfg configs/config_mixed_stage1_vae_global_wo_mesh_lr1e-4.yaml
 ```
 
+</details>
+
 ---
 
 ## Stage 2 — SLB Model Training (LLM Expert)
+
+<details>
+<summary><b>Show Stage 2 SLB model training (face + body experts)</b></summary>
 
 The Stage 2 model is a transformer with a mixture-of-modality-experts (MoME) architecture that consumes interleaved audio / text / motion tokens. Training uses **DeepSpeed** for multi-GPU data parallelism.
 
@@ -90,12 +98,73 @@ Key arguments:
 
 The DeepSpeed launcher injects `--local_rank` automatically; don't set it by hand.
 
+### Body Expert — three training targets
+
+The body expert is trained with `training/train_vibes.py`. We define **three targets** that differ
+only in the combined dataset they consume (built in [`1-data/combine.md`](1-data/combine.md)):
+
+| Target | `--tokenized_dataset` | Sources |
+|---|---|---|
+| **`cospeech`** | `<OUT>/processed_body_cospeech_train` | BEAT2 + Embody3D |
+| **`text2motion`** | `<OUT>/processed_h3d_text2motion_train/tokenized_dataset` | HumanML3D (alone) |
+| **`full`** | `<OUT>/processed_body_full_train` | BEAT2 + AMASS + Embody3D (all body except YouTube) |
+
+Example 4-GPU launch (co-speech target):
+
+```bash
+deepspeed --include localhost:0,1,2,3 --master_port=29508 --master_addr=127.0.0.1 \
+    training/train_vibes.py \
+    --tokenized_dataset <OUT>/processed_body_cospeech_train \
+    --output_dir <OUT>/experiments/vibes_body_cospeech \
+    --batch_size 8 \
+    --learning_rate 1e-4 \
+    --epochs 20000000 \
+    --layer_num 40 \
+    --save_steps 1000 \
+    --zero_stage 2 \
+    --glm_base_path THUDM/glm-4-voice-9b
+```
+
+Swap `--tokenized_dataset` + `--output_dir` for the `text2motion` / `full` targets; all other flags
+match the face launcher table above. `train_vibes.py` freezes the text/audio Expert-0 and saves
+**Expert-1-only** (motion) checkpoints — the frozen Expert-0 is reconstructed from the GLM-4-Voice
+base at load (see the inference scripts' `--glm_base_path`).
+
+> **`--zero_stage` (default 2).** ViBES's MoME is frozen-heavy: the ~19 GB text/audio Expert-0 never
+> updates and only the small motion expert trains. ZeRO-2 (params replicated, just the motion
+> expert's grads/optimizer sharded) is markedly faster here than ZeRO-3, which would needlessly
+> all-gather the frozen weights every step. Use `--zero_stage 3` only if the model doesn't fit
+> replicated. (`--no_gradient_checkpointing` is available too, but the vendored MoME forward
+> currently requires checkpointing on.)
+
+#### 0.5B variant (ViBES-Audio backbone)
+
+To train a **lightweight** ViBES expert on the distilled
+[ViBES-Audio](https://huggingface.co/JuzeZhang/ViBES-Audio) 0.5B backbone instead of GLM-4-Voice-9B,
+point at the 0.5B MoME config + base (`--layer_num 24` to match its depth):
+
+```bash
+deepspeed --include localhost:0,1,2 --master_port=29509 \
+    training/train_vibes.py \
+    --tokenized_dataset <OUT>/<dataset for this expert> \
+    --output_dir <OUT>/experiments/vibes_<expert>_0p5b \
+    --vibes_config vibes_0.5b \
+    --glm_base_path <path to ViBES-Audio> \
+    --layer_num 24 --batch_size 32 --zero_stage 2 --save_steps 1000
+```
+
+`vibes_0.5b/` is the MoME config scaled to ViBES-Audio's dims (hidden 1024 / 24 layers); the motion
+expert still cross-attends to the speech-text expert through the shared attention space, so only the
+backbone size changes. Same recipe for the face or body expert — only `--tokenized_dataset` differs.
+
 ### Required inputs
 
 1. **Pretrained Stage 1 tokenizers** — face / body VQ-VAE checkpoints from above (or downloaded per [`0-overview.md`](0-overview.md))
 2. **Tokenized HuggingFace datasets** — preprocessed conversational data (audio + text + motion tokens) — see the per-dataset guides in [`1-data/`](1-data/)
 3. **GLM-4-Voice components** — speech tokenizer/decoder from `./scripts/download_glm4voice_modules.sh`
 4. **(Optional) Warm-start checkpoint** — for style-control fine-tuning, pass `--pretrained_model_path` pointing at an earlier face-expert checkpoint
+
+</details>
 
 ---
 

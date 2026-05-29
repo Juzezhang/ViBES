@@ -85,6 +85,10 @@ if ROOT_DIR in sys.path:
     sys.path.remove(ROOT_DIR)
 sys.path.insert(0, ROOT_DIR)
 
+# Per-expert checkpoint loading (Expert-1-only checkpoints + GLM-base reconstruction of Expert-0)
+sys.path.insert(0, os.path.join(ROOT_DIR, "training"))
+from expert_io import is_expert1_checkpoint, load_expert1_checkpoint
+
 from utils.genmo.geo_transform import apply_T_on_points, compute_T_ayfz2ay
 from utils.genmo.vis.renderer import Renderer, get_global_cameras_static, get_ground_params_from_points
 from utils.genmo.camera import create_camera_sensor
@@ -200,8 +204,13 @@ def integrate_local_velocity(local_vel, global_orient_aa, init_pos=None):
     return pos
 
 
-def load_model(tokenizer_path, checkpoint_path, device):
-    """Load a model from config and checkpoint."""
+def load_model(tokenizer_path, checkpoint_path, device, glm_base_path="THUDM/glm-4-voice-9b"):
+    """Load a model from config and checkpoint.
+
+    Expert-1-only checkpoints (marked with expert_checkpoint.json) store just the trained motion
+    expert; reconstruct the frozen text/audio expert (Expert-0) from the GLM-4-Voice base and merge.
+    Full checkpoints (no marker) load normally for backward compatibility.
+    """
     config = AutoConfig.from_pretrained(tokenizer_path, trust_remote_code=True)
     model = AutoModel.from_config(
         config,
@@ -209,7 +218,14 @@ def load_model(tokenizer_path, checkpoint_path, device):
         torch_dtype=torch.bfloat16 if device.startswith("cuda") else torch.float32,
         attn_implementation="flash_attention_2",
     ).to(device)
-    load_sharded_checkpoint(model, checkpoint_path)
+    if is_expert1_checkpoint(checkpoint_path):
+        print(f"  Detected Expert-1-only checkpoint; reconstructing Expert-0 from {glm_base_path}")
+        _, _, unexpected = load_expert1_checkpoint(model, checkpoint_path, glm_base_path)
+        unexpected = [k for k in unexpected if "rotary_pos_emb" not in k]
+        if unexpected:
+            print(f"  Warning: {len(unexpected)} unexpected keys, e.g. {unexpected[:3]}")
+    else:
+        load_sharded_checkpoint(model, checkpoint_path)
     model.eval()
     return model
 
@@ -505,6 +521,10 @@ def main():
     )
     parser.add_argument('--checkpoint', type=str, required=True,
                         help='Path to body model checkpoint directory')
+    parser.add_argument('--glm_base_path', type=str, default="THUDM/glm-4-voice-9b",
+                        help='GLM-4-Voice base used to reconstruct the frozen text/audio expert '
+                             '(Expert-0) when --checkpoint is an Expert-1-only checkpoint. '
+                             'Ignored for full checkpoints.')
     parser.add_argument('--output_dir', type=str, default="./test_output",
                         help='Output directory for generated videos')
     parser.add_argument('--device', type=str, default="cuda", choices=["cuda", "cpu"],
@@ -548,7 +568,7 @@ def main():
 
     # Load body model
     print(f"\n=== Step 2: Load Body Model from {args.checkpoint} ===")
-    model = load_model(tokenizer_path, args.checkpoint, device)
+    model = load_model(tokenizer_path, args.checkpoint, device, args.glm_base_path)
 
     # Generate
     generate_body_from_text(

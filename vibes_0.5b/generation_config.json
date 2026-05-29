@@ -1,0 +1,14 @@
+{
+  "device": "cuda",
+  "do_sample": true,
+  "eos_token_id": [
+    151329,
+    151336,
+    151338
+  ],
+  "max_length": 128000,
+  "pad_token_id": 151329,
+  "temperature": 0.8,
+  "top_p": 0.8,
+  "transformers_version": "4.52.0.dev0"
+}

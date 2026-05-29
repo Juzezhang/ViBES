@@ -16,16 +16,33 @@ face).
 - Official tools / loaders: <https://github.com/facebookresearch/embody-3d>
 - Paper: [Embody 3D (arXiv:2510.16258)](https://arxiv.org/abs/2510.16258)
 
-Download to a local root (`<EMBODY3D_ROOT>`); the conversational ("aiagent") subset is the
-one ViBES consumes.
+Embody3D ships per-subset manifests (`datasets/<subset>/dataset.json`) and a downloader
+(`src/download.py`, with `--category {charades,daylife,dyadic,hands,locomotion,multiperson,scenarios}`
+and `--feat {smplx,audio,text,videos}`). ViBES uses the **`aiagent`** subset (`datasets/aiagent/`) —
+the dyadic AI-agent conversational takes, whose names contain `AIAGENT_scene_*` and
+`PROXEMICS_AIAGENT_scene_*`. Point the packer's `--data_root` at this `aiagent` directory.
 
-## Step 1 — Motion → SMPL-X and tokenize
+## Step 1 — Motion → SMPL-X parts → tokenize
 
-Convert Embody3D's tracked motion to the ViBES body parts (upper / lower / hand) and tokenize
-both motion and audio with the shared tokenizers (same tooling as the other datasets — see
-[`beat2.md`](beat2.md) / [`amass.md`](amass.md) for the GENMO/parts conversion and
+**1a. Raw SMPL-X components → upper/lower/hand parts.** Embody3D stores each participant's motion as
+separate per-component `.npy` files (`smplx_mesh_{global_orient,body_pose,jaw_pose,leye_pose,reye_pose,
+left_hand_pose,right_hand_pose,transl,betas}/`). Assemble them into the SMPL-X `poses(165)+trans(3)`
+layout, resample 30→25 fps (to match BEAT2/AMASS), and split into the ViBES body parts:
+
+```bash
+python -m preprocess.dataset_process_embody3d_parts \
+    --data_root    <EMBODY3D_ROOT>/datasets/dyadic \
+    --output_dir   <EMBODY3D_ROOT>/embody3d_parts_25 \
+    --scene_filter AIAGENT          # restrict to the aiagent conversational captures
+```
+
+This writes one `.npz` per (capture, participant) with `upper (n,78)`, `lower (n,61)`, `hand (n,180)`,
+`trans`, `betas`.
+
+**1b. Tokenize motion + audio** with the shared tokenizers (same tooling as the other datasets — see
+[`beat2.md`](beat2.md) / [`amass.md`](amass.md) and
 `preprocess/scripts/get_compositional_motion_code.py` + `get_audio_code_glm.py`). The body
-packer below expects this **already-tokenized** layout under `<EMBODY3D_ROOT>`:
+packer below expects this **tokenized** layout under `<EMBODY3D_ROOT>`:
 
 ```
 <EMBODY3D_ROOT>/

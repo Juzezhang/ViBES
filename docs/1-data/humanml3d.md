@@ -24,14 +24,20 @@ Run the upstream [HumanML3D pipeline](https://github.com/EricGuo5513/HumanML3D).
 > ```
 > Final layout: `body_models/smplh/{male,female,neutral}/...` and `body_models/dmpls/{male,female,neutral}/...`. Registration with MPI is required to download.
 
-> 🩹 **Running the upstream notebooks on a modern (numpy ≥1.24, multi-GPU) environment.** The HumanML3D notebooks predate current numpy/CUDA setups. We hit and fixed the following — apply the same if you run them headless (`jupyter nbconvert --to script *.ipynb`):
-> 1. **AMASS SMPL+H folder names already match** — the SMPL+H download extracts to HumanML3D's expected names (`BioMotionLab_NTroje`, `DFaust_67`, `MPI_HDM05`, `MPI_Limits`, `MPI_mosh`, `SSM_synced`, `Transitions_mocap`, `Eyes_Japan_Dataset`, …), so symlink/copy them straight into `./amass_data/` (no renaming).
-> 2. If `./amass_data/<dataset>` are **symlinks**, pass `os.walk('./amass_data', followlinks=True)` (default doesn't descend symlinks).
-> 3. After nbconvert, delete the `get_ipython()` magic lines; only process `.npz` files in the AMASS walk (skip stray `LICENSE.txt`/`info.txt`).
-> 4. `comp_device` is hardcoded to `cuda:2` in `raw_pose_processing.ipynb` — change to an available device (`cuda:0`).
-> 5. `unzip pose_data/humanact12.zip` before the index/segment loop, and `mkdir -p ./joints` (the segment loop writes there without creating it).
-> 6. numpy ≥1.24 removed `np.float`/`np.int`/`np.bool` — `common/quaternion.py` uses `np.finfo(np.float)`; replace with `np.float64`.
-> 7. The notebooks' `reference1 = np.load('./HumanML3D/…')` lines double-check against the *official* release files (which you won't have on a fresh run) — comment them out.
+<details>
+<summary>🩹 <b>Running the upstream notebooks on a modern (numpy ≥1.24, multi-GPU) environment</b></summary>
+
+The HumanML3D notebooks predate current numpy/CUDA setups. We hit and fixed the following — apply the same if you run them headless (`jupyter nbconvert --to script *.ipynb`):
+
+1. **AMASS SMPL+H folder names already match** — the SMPL+H download extracts to HumanML3D's expected names (`BioMotionLab_NTroje`, `DFaust_67`, `MPI_HDM05`, `MPI_Limits`, `MPI_mosh`, `SSM_synced`, `Transitions_mocap`, `Eyes_Japan_Dataset`, …), so symlink/copy them straight into `./amass_data/` (no renaming).
+2. If `./amass_data/<dataset>` are **symlinks**, pass `os.walk('./amass_data', followlinks=True)` (default doesn't descend symlinks).
+3. After nbconvert, delete the `get_ipython()` magic lines; only process `.npz` files in the AMASS walk (skip stray `LICENSE.txt`/`info.txt`).
+4. `comp_device` is hardcoded to `cuda:2` in `raw_pose_processing.ipynb` — change to an available device (`cuda:0`).
+5. `unzip pose_data/humanact12.zip` before the index/segment loop, and `mkdir -p ./joints` (the segment loop writes there without creating it).
+6. numpy ≥1.24 removed `np.float`/`np.int`/`np.bool` — `common/quaternion.py` uses `np.finfo(np.float)`; replace with `np.float64`.
+7. The notebooks' `reference1 = np.load('./HumanML3D/…')` lines double-check against the *official* release files (which you won't have on a fresh run) — comment them out.
+
+</details>
 
 After it finishes, your `<HUMANML3D_ROOT>` should look like:
 
@@ -49,9 +55,9 @@ After it finishes, your `<HUMANML3D_ROOT>` should look like:
 └── train_val.txt          (training + validation combined)
 ```
 
-## Step 2 — Tokenize motion with the body VQ-VAE
+## Step 2 — Tokenize motion with the MotionGPT VQ-VAE
 
-Tokenize the HumanML3D motion features using the body VQ-VAE tokenizer — see [`../2-training.md`](../2-training.md) for the tokenizer details and pretrained checkpoint paths. The expected output is a flat folder of one `.npy` per clip stem:
+Tokenize the HumanML3D motion features into discrete codes. The expected output is a flat folder of one `.npy` per clip stem:
 
 ```
 <HUMANML3D_ROOT>/TOKENS/
@@ -61,6 +67,30 @@ Tokenize the HumanML3D motion features using the body VQ-VAE tokenizer — see [
 ├── M000000.npy         (mirror of 000000)
 └── ...
 ```
+
+### Why the MotionGPT VQ-VAE (and not a ViBES body tokenizer)?
+
+HumanML3D motion is stored in the **263-dimensional kinematic feature** format of Guo et al. (root
+angular/linear velocity, local joint positions, 6D joint rotations, joint velocities, and foot-contact
+labels) — the de-facto standard representation for text-to-motion benchmarks. This is **not** the
+representation ViBES uses natively: the ViBES body experts operate on SMPL-X part rotations
+(upper/lower/hand) and the released full-body tokenizer on the GENMO 135D vector. ViBES's own body
+VQ-VAEs therefore cannot tokenize the 263D features directly.
+
+So for HumanML3D we use the **MotionGPT VQ-VAE** ([OpenMotionLab/MotionGPT](https://github.com/OpenMotionLab/MotionGPT)),
+the reference VQ-VAE for the 263D HumanML3D representation. Its architecture is ported into ViBES at
+[`multimodal_tokenizers/archs/motiongpt_vq.py`](../../multimodal_tokenizers/archs/motiongpt_vq.py)
+(`MotionGPTVQVae` / `MotionGPTVQVaeAdapter` — a 1D-convolutional encoder/decoder with an EMA-reset
+codebook, downsampling motion to the token FPS). Using the same tokenizer the text-to-motion
+literature uses means:
+
+- the resulting motion tokens are **directly comparable** to standard text-to-motion baselines, and
+- it demonstrates the graceful-degradation point above — the ViBES MoME model consumes these standard
+  tokens unchanged to do plain text → motion, with no model change.
+
+> ℹ️ The released full-body **GENMO** tokenizer uses this *same* MotionGPT VQ-VAE architecture (see
+> [`../2-training.md`](../2-training.md)), but trained on the GENMO 135D representation rather than
+> HumanML3D's 263D — i.e. the architecture is shared, the input representation and codebook differ.
 
 ## Step 3 — Build the HuggingFace text-to-motion dataset
 
