@@ -1,3 +1,6 @@
 [submodule "speech_related/Matcha-TTS"]
 	path = speech_related/Matcha-TTS
 	url = https://github.com/shivammehta25/Matcha-TTS
+[submodule "speech_related/cosyvoice/third_party/Matcha-TTS"]
+	path = speech_related/cosyvoice/third_party/Matcha-TTS
+	url = https://github.com/shivammehta25/Matcha-TTS.git
