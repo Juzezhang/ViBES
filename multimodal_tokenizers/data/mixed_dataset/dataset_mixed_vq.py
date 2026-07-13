@@ -157,6 +157,15 @@ class MixedDatasetVQ(data.Dataset):
                     self._load_preprocessed_beat2(config)
                     self.data_dict.update(self.data_dict_preprocessed_beat2)
                     self.metadata.extend(self.metadata_preprocessed_beat2)
+                elif base_name == "BONES" or "BONES" in base_name.upper():
+                    # BONES reuses the AMASS preprocessed loader (reads self.args["BONES"].ROOT,
+                    # resets its dicts each call) but re-tags segments as a DISTINCT dataset so the
+                    # WeightedRandomSampler (get_sampling_weights) can up/down-weight bones vs AMASS.
+                    self._load_preprocessed_amass(config)
+                    for _k in self.metadata_preprocessed_amass:
+                        self.data_dict_preprocessed_amass[_k]["dataset_name"] = "bones"
+                    self.data_dict.update(self.data_dict_preprocessed_amass)
+                    self.metadata.extend(self.metadata_preprocessed_amass)
                 elif base_name == "AMASS" or "AMASS" in base_name.upper():
                     self._load_preprocessed_amass(config)
                     self.data_dict.update(self.data_dict_preprocessed_amass)

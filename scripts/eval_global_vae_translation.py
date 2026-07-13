@@ -157,8 +157,16 @@ def main():
             to_global = lower[:, :, :global_dim].clone()
             if to_global.shape[2] > 54:
                 to_global[:, :, 54:] = 0.0
+            # dataset-conditioning: pass a fixed dataset id for this eval (VIBES_EVAL_DSID: beat2=0/amass=1/bones=2).
+            # None if the model isn't conditioned or the env is unset (backward-compatible).
+            _dsid = os.environ.get("VIBES_EVAL_DSID")
+            _dsid_t = (torch.full((to_global.shape[0],), int(_dsid), dtype=torch.long, device=to_global.device)
+                       if _dsid not in (None, "") else None)
             with torch.no_grad():
-                rec_pose = model.vae_global(to_global)["rec_pose"]
+                try:
+                    rec_pose = model.vae_global(to_global, dataset_id=_dsid_t)["rec_pose"]
+                except TypeError:
+                    rec_pose = model.vae_global(to_global)["rec_pose"]   # old (unconditioned) model
             rec_local_vel = rec_pose[:, :, 54:57]
             rec_trans, _ = model._integrate_local_velocity(
                 rec_local_vel, tar_go6d, init_pos=tar_trans[:, 0, :])
