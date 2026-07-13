@@ -582,21 +582,25 @@ def reparameterize(mu, logvar):
 
 
 class VAEConvZero(nn.Module):
-    def __init__(self, vae_layer=4, code_num=256, vae_test_dim=61, codebook_size=256, vae_quantizer_lambda=1.0):
+    def __init__(self, vae_layer=4, code_num=256, vae_test_dim=61, codebook_size=256, vae_quantizer_lambda=1.0,
+                 num_datasets=3):
         super(VAEConvZero, self).__init__()
         self.encoder = VQEncoderV5(vae_layer, code_num, vae_test_dim)
         # self.quantizer = Quantizer(args.vae_codebook_size, args.vae_length, args.vae_quantizer_lambda)
         self.decoder = VQDecoderV5(vae_layer, code_num, vae_test_dim)
-        
-    def forward(self, inputs):
-        pre_latent = self.encoder(inputs)
-        # print(pre_latent.shape)
-        # embedding_loss, vq_latent, _, perplexity = self.quantizer(pre_latent)
+        # Dataset-conditioning: per-dataset latent offset resolves the multi-task tension between
+        # near-static co-speech (BEAT2, translation~0) and locomotion (AMASS/bones). Zero-init so a
+        # pretrained (dataset-blind) checkpoint loads as an exact no-op, then learns per-dataset offsets.
+        self.dataset_embedding = nn.Embedding(num_datasets, code_num)
+        nn.init.zeros_(self.dataset_embedding.weight)
+
+    def forward(self, inputs, dataset_id=None):
+        pre_latent = self.encoder(inputs)          # [B, T, code_num]
+        if dataset_id is not None:
+            emb = self.dataset_embedding(dataset_id)      # [B, code_num]
+            pre_latent = pre_latent + emb.unsqueeze(1)    # broadcast over time (dim 1 = T)
         rec_pose = self.decoder(pre_latent)
         return {
-            # "poses_feat":vq_latent,
-            # "embedding_loss":embedding_loss,
-            # "perplexity":perplexity,
             "rec_pose": rec_pose
             }
     
