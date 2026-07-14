@@ -84,3 +84,7 @@ scripts/compare_face_paths.py
 scripts/visualize_webtalk_face_tokenized_dataset.py
 scripts/run_body_cospeech_9b_mask_train.sh
 scripts/run_webtalk_face_long_train.sh
+# Q2M eval / tokenizer model subpackage is CODE — publish it (bare `models/` rule above
+# targets the top-level scratch dir, not this python subpackage)
+!multimodal_tokenizers/models/
+!multimodal_tokenizers/models/*.py
