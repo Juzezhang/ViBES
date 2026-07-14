@@ -1,0 +1,113 @@
+NAME: QuestionMotionCLIP_v3_body22
+FULL_CONFIG: true
+ACCELERATOR: 'gpu'
+NUM_NODES: 1
+DEVICE: [0]
+DEBUG: false
+SEED_VALUE: 42
+
+TRAIN:
+  STAGE: 'clip'
+  SPLIT: train
+  NUM_WORKERS: 8
+  BATCH_SIZE: 64
+  END_EPOCH: 150
+  RESUME: ''
+  PRETRAINED: ''
+  PRECISION: 32
+  GRADIENT_CLIP_VAL: 0.5
+  OPTIM:
+    target: AdamW
+    params:
+      lr: 1e-4
+      weight_decay: 0.00002
+  LR_SCHEDULER:
+    target: CosineWarmup
+    params:
+      warmup_epochs: 10
+      max_epochs: 150
+      eta_min: 1e-6
+
+EVAL:
+  SPLIT: val
+  BATCH_SIZE: 64
+  NUM_WORKERS: 4
+
+TEST:
+  SPLIT: test
+  BATCH_SIZE: 64
+  NUM_WORKERS: 4
+
+DATASET:
+  target: multimodal_tokenizers.data.converse3d_question_motion.Converse3DQuestionMotionDataModule
+  data_root: /path/to/Converse3D_eval
+  motion_dir: motion_segments
+  text_dir: questions
+  max_length: 196
+  num_joints: 22
+  EVAL_DETERMINISTIC: false
+  fps: 25
+  JOINT_TYPE: smplx
+
+MODEL:
+  TEXT_ENCODER_TYPE: 'lightweight'
+  NUM_LAYERS: 8
+  NUM_HEADS: 8
+  LATENT_DIM: 1024
+  FF_SIZE: 2048
+  DROPOUT: 0.1
+  INPUT_DIM: 135
+  EMBED_DIM: 512
+  ACTIVATION: gelu
+  CLIP_MODEL: ViT-L/14@336px
+
+model:
+  target: multimodal_tokenizers.models.text_motion_clip.TextMotionCLIP
+  params:
+    condition: 'text'
+    task: 'text_motion_clip'
+    motion_vae: null
+    stage: 'clip'
+    debug: false
+    codebook_size: 0
+    motion_codebook_size: 0
+    audio_codebook_size: 0
+    metrics_dict: []
+
+METRIC:
+  TYPE: []
+
+EVAL_METRICS:
+  EVERY_N_EPOCHS: 10
+  REPLICATION_TIMES: 20
+  R_SIZE: 32
+  DIVERSITY_TIMES: 300
+  EMB_SCALE: 6.0
+  DIVERSITY_PAIR_DIVISOR: 2.0
+
+LOSS:
+  ABLATION:
+    RECONS_LOSS: 'l1_smooth'
+
+LOGGER:
+  TYPE: ['wandb']
+  VAL_EVERY_STEPS: 5
+  LOG_EVERY_N_STEPS: 50
+  WANDB:
+    target: pytorch_lightning.loggers.WandbLogger
+    params:
+      project: 'QuestionMotionCLIP'
+      offline: false
+      id: null
+      version: ''
+      name: ${NAME}
+      save_dir: ${FOLDER_EXP}
+  TENSORBOARD:
+    target: pytorch_lightning.loggers.TensorBoardLogger
+    params:
+      save_dir: ${FOLDER_EXP}
+      name: 'tensorboard'
+      version: ''
+
+FOLDER: ./experiments
+FOLDER_EXP: ./experiments/question_motion_clip_v3_body22
