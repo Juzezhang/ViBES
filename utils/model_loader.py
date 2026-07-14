@@ -67,12 +67,16 @@ def _load_module_state(module: torch.nn.Module, state_dict: dict, prefix: str) -
     """
     extracted = extract_state_dict_keys(state_dict, prefix)
     if extracted:
-        module.load_state_dict(extracted, strict=True)
+        # strict=False: module may carry newer zero-init layers (e.g. dataset_embedding from
+        # 3-dataset conditioning) absent in older released checkpoints — loads them as a no-op.
+        module.load_state_dict(extracted, strict=False)
         return
 
     module_keys = set(module.state_dict().keys())
     if all(k in module_keys for k in state_dict.keys()):
-        module.load_state_dict(state_dict, strict=True)
+        # strict=False: the module may carry newer zero-init layers (e.g. dataset_embedding
+        # from 3-dataset conditioning) absent in older released checkpoints — load as no-op.
+        module.load_state_dict(state_dict, strict=False)
         return
 
     filtered = {k: v for k, v in state_dict.items() if k in module_keys}
