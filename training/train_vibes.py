@@ -463,6 +463,10 @@ if __name__ == "__main__":
                         help="MoME config+tokenizer dir. Default ./vibes (9B backbone). Use vibes_0.5b "
                              "(hidden 1024 / 24 layers) with --glm_base_path <ViBES-Audio> --layer_num 24 "
                              "for the 0.5B variant.")
+    parser.add_argument("--mot_vocab_size", type=int, default=1282,
+                        help="Motion-expert vocabulary size. Default 1282 (co-speech body: "
+                             "512+256+256+256+2). Use 514 for H3D text-to-motion (512 codes + "
+                             "begin/end); the token stream and this size must match the checkpoint.")
     args = parser.parse_args()
     
     # Output training configuration information
@@ -567,6 +571,7 @@ if __name__ == "__main__":
         config.num_layers = args.layer_num
         config.torch_dtype = torch.bfloat16
         config._attn_implementation = args.attn_implementation
+        config.mot_settings['mot_vocab_size'] = args.mot_vocab_size   # size motion expert BEFORE load (must match ckpt)
         language_model = ChatGLMForConditionalGenerationMotExpertNum2(config, empty_init=True, device="cpu")
         language_model = language_model.to(dtype=torch.bfloat16)
         if is_expert1_checkpoint(args.pretrained_model_path):
@@ -584,6 +589,7 @@ if __name__ == "__main__":
         config.num_layers = args.layer_num
         config.torch_dtype = torch.bfloat16
         config._attn_implementation = args.attn_implementation
+        config.mot_settings['mot_vocab_size'] = args.mot_vocab_size   # size motion expert (514 for H3D t2m, 1282 co-speech)
         language_model = ChatGLMForConditionalGenerationMotExpertNum2(config, empty_init=True, device="cpu")
         language_model = language_model.to(dtype=torch.bfloat16)
 
@@ -662,8 +668,8 @@ if __name__ == "__main__":
         model_device = next(language_model.parameters()).device
         print(f"Model moved to: {model_device}")
 
-    # Adjust model vocabulary size and update config
-    language_model = resize_glm_vocab_expert2(language_model, 1282) # 512+256+256+256 + 2
+    # Adjust model vocabulary size and update config (1282 co-speech = 512+256+256+256+2; 514 H3D t2m)
+    language_model = resize_glm_vocab_expert2(language_model, args.mot_vocab_size)
     # print(f"Original modality2 model vocab_size: {len(tokenizer)}")
     # print(f"Resized modality2 model vocab_size (config): {language_model.config.vocab_size}")
 
