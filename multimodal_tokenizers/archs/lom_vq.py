@@ -583,22 +583,44 @@ def reparameterize(mu, logvar):
 
 class VAEConvZero(nn.Module):
     def __init__(self, vae_layer=4, code_num=256, vae_test_dim=61, codebook_size=256, vae_quantizer_lambda=1.0,
-                 num_datasets=3):
+                 num_datasets=3, conditioning='add', feed_betas=False, beta_dim=10):
         super(VAEConvZero, self).__init__()
         self.encoder = VQEncoderV5(vae_layer, code_num, vae_test_dim)
         # self.quantizer = Quantizer(args.vae_codebook_size, args.vae_length, args.vae_quantizer_lambda)
         self.decoder = VQDecoderV5(vae_layer, code_num, vae_test_dim)
-        # Dataset-conditioning: per-dataset latent offset resolves the multi-task tension between
+        # Betas (shape) conditioning: per-sequence latent offset projected from the 10-D SMPL-X betas.
+        # Translation magnitude scales with LEG LENGTH (a function of betas): the same joint-angle gait
+        # covers more ground for longer legs. betas are a DEPLOYABLE input (known at inference, not a
+        # dataset label). zero-init Linear -> exact no-op at load. Only added when feed_betas=True.
+        self.feed_betas = feed_betas
+        if feed_betas:
+            self.beta_proj = nn.Linear(beta_dim, code_num)
+            nn.init.zeros_(self.beta_proj.weight); nn.init.zeros_(self.beta_proj.bias)
+        # Dataset-conditioning: per-dataset latent modulation resolves the multi-task tension between
         # near-static co-speech (BEAT2, translation~0) and locomotion (AMASS/bones). Zero-init so a
-        # pretrained (dataset-blind) checkpoint loads as an exact no-op, then learns per-dataset offsets.
-        self.dataset_embedding = nn.Embedding(num_datasets, code_num)
+        # pretrained (dataset-blind) checkpoint loads as an exact no-op, then learns per-dataset params.
+        #   'add'  : additive latent offset  pre_latent + beta_d           (a per-dataset bias)
+        #   'film' : FiLM  pre_latent * (1 + gamma_d) + beta_d             (per-dataset scale AND shift;
+        #            the scale lets each dataset set its own input->velocity gain, which a bias cannot —
+        #            the mechanism that separates BEAT2's ~0 velocity from bones/AMASS locomotion.)
+        self.conditioning = conditioning
+        self.dataset_embedding = nn.Embedding(num_datasets, code_num)   # beta_d
         nn.init.zeros_(self.dataset_embedding.weight)
+        if conditioning == 'film':
+            self.dataset_gamma = nn.Embedding(num_datasets, code_num)   # gamma_d, zero-init -> scale=1 at load
+            nn.init.zeros_(self.dataset_gamma.weight)
 
-    def forward(self, inputs, dataset_id=None):
+    def forward(self, inputs, dataset_id=None, betas=None):
         pre_latent = self.encoder(inputs)          # [B, T, code_num]
         if dataset_id is not None:
-            emb = self.dataset_embedding(dataset_id)      # [B, code_num]
-            pre_latent = pre_latent + emb.unsqueeze(1)    # broadcast over time (dim 1 = T)
+            beta = self.dataset_embedding(dataset_id).unsqueeze(1)      # [B, 1, code_num] broadcast over T
+            if self.conditioning == 'film':
+                gamma = self.dataset_gamma(dataset_id).unsqueeze(1)     # [B, 1, code_num]
+                pre_latent = pre_latent * (1.0 + gamma) + beta
+            else:
+                pre_latent = pre_latent + beta
+        if self.feed_betas and betas is not None:
+            pre_latent = pre_latent + self.beta_proj(betas).unsqueeze(1)  # [B,1,code_num] shape offset over T
         rec_pose = self.decoder(pre_latent)
         return {
             "rec_pose": rec_pose

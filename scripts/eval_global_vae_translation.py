@@ -155,16 +155,33 @@ def main():
             tar_trans, _ = model._integrate_local_velocity(tar_local_vel, tar_go6d)
 
             to_global = lower[:, :, :global_dim].clone()
+            # velocity (54:57) always zeroed (target); foot contacts (57:61) kept iff VIBES_EVAL_FEED_CONTACTS
+            _feed_c = os.environ.get("VIBES_EVAL_FEED_CONTACTS") not in (None, "", "0")
             if to_global.shape[2] > 54:
-                to_global[:, :, 54:] = 0.0
-            # dataset-conditioning: pass a fixed dataset id for this eval (VIBES_EVAL_DSID: beat2=0/amass=1/bones=2).
-            # None if the model isn't conditioned or the env is unset (backward-compatible).
+                to_global[:, :, 54:57] = 0.0
+                if not (_feed_c and to_global.shape[2] >= 61):
+                    to_global[:, :, 57:] = 0.0
+            # dataset-conditioning (legacy, non-deployable): fixed VIBES_EVAL_DSID (beat2=0/amass=1/bones=2).
+            # Leave UNSET for the deployable unconditioned models.
             _dsid = os.environ.get("VIBES_EVAL_DSID")
             _dsid_t = (torch.full((to_global.shape[0],), int(_dsid), dtype=torch.long, device=to_global.device)
                        if _dsid not in (None, "") else None)
+            # betas (shape) input — deployable (VIBES_EVAL_FEED_BETAS): translation scales with leg length
+            _betas = None
+            if os.environ.get("VIBES_EVAL_FEED_BETAS") not in (None, "", "0"):
+                _bfull = None
+                if "shape" in batch:
+                    _b = batch["shape"].to(device); _b = _b[:, 0, :] if _b.dim() == 3 else _b
+                    _bfull = _b; _betas = _b[:, :10]
+                elif lower.shape[2] >= 71:
+                    _betas = lower[:, 0, 61:71]; _bfull = _betas
+                if _betas is not None and os.environ.get("VIBES_EVAL_MEASURE") not in (None, "", "0"):
+                    _m = model._betas_to_measurements(_bfull)   # FULL native betas -> limb measurements (m)
+                    _betas = (torch.cat([_m, _bfull[:, :10]], dim=-1)
+                              if os.environ.get("VIBES_EVAL_MEASURE_CAT") not in (None, "", "0") else _m)
             with torch.no_grad():
                 try:
-                    rec_pose = model.vae_global(to_global, dataset_id=_dsid_t)["rec_pose"]
+                    rec_pose = model.vae_global(to_global, dataset_id=_dsid_t, betas=_betas)["rec_pose"]
                 except TypeError:
                     rec_pose = model.vae_global(to_global)["rec_pose"]   # old (unconditioned) model
             rec_local_vel = rec_pose[:, :, 54:57]

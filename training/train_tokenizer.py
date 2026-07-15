@@ -105,7 +105,7 @@ def main():
         devices=cfg.DEVICE,
         num_nodes=cfg.NUM_NODES,
         strategy="ddp_find_unused_parameters_true"
-        if len(cfg.DEVICE) > 1 else 'auto',
+        if (len(cfg.DEVICE) if hasattr(cfg.DEVICE, '__len__') else int(cfg.DEVICE)) > 1 else 'auto',
         benchmark=False,
         deterministic=False,
         # num_sanity_val_steps=0
