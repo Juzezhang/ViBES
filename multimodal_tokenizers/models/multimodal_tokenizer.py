@@ -333,6 +333,35 @@ class MultimodalTokenizer(BaseModel):
             ids.append(2 if "bones" in s else (0 if "beat2" in s else 1))  # default amass(1)
         return torch.as_tensor(ids, dtype=torch.long, device=device)
 
+    def _betas_to_measurements(self, betas):
+        """Deployable, model-agnostic shape feature: physical limb measurements (meters) from betas via
+        SMPL-X T-pose FK. Translation scales with LEG LENGTH; unlike raw betas this is a basis-free physical
+        quantity (a meter is a meter). Returns [B,3] = (leg_length, stature, hip_width), nominally centered.
+        Uses the FULL native betas (e.g. BEAT2 300-D) so the reconstructed body — and thus the limb lengths —
+        is correct; truncating to 10 would distort the shape."""
+        import smplx as _smplx
+        dev = betas.device
+        if getattr(self, "_smplx_measure", None) is None:
+            path = self.cfg.DATASET.SMPLX_MODEL_DIR
+            self._smplx_measure = _smplx.create(
+                path, model_type='smplx', gender='NEUTRAL_2020', use_face_contour=False,
+                num_betas=300, num_expression_coeffs=100, ext='npz', use_pca=False).to(dev).eval()
+        B = betas.shape[0]
+        b300 = torch.zeros(B, 300, device=dev, dtype=torch.float32)
+        n = min(300, betas.shape[1]); b300[:, :n] = betas[:, :n].float()   # full native betas
+        z = lambda d: torch.zeros(B, d, device=dev, dtype=torch.float32)     # zero pose at batch B (T-pose)
+        with torch.no_grad():
+            J = self._smplx_measure(
+                betas=b300, transl=z(3), expression=z(100), global_orient=z(3), body_pose=z(63),
+                left_hand_pose=z(45), right_hand_pose=z(45), jaw_pose=z(3), leye_pose=z(3), reye_pose=z(3),
+                return_verts=False, return_joints=True)['joints']   # [B, nJ, 3], T-pose
+            L_hip, R_hip, L_knee, L_ankle, head, L_foot = J[:, 1], J[:, 2], J[:, 4], J[:, 7], J[:, 15], J[:, 10]
+            leg = (L_hip - L_knee).norm(dim=-1) + (L_knee - L_ankle).norm(dim=-1)   # thigh + shank
+            stature = (head[:, 1] - L_foot[:, 1]).abs()
+            hipw = (L_hip - R_hip).norm(dim=-1)
+            m = torch.stack([leg - 0.80, stature - 1.65, hipw - 0.19], dim=-1)       # meters, centered
+        return m.detach()
+
     def _decode_genmo_to_smplx(self, motion_vector, trans=None):
         """
         Decode GENMO motion_vector (145D) to SMPL-X axis-angle pose + translation.
@@ -1320,7 +1349,16 @@ class MultimodalTokenizer(BaseModel):
             # Unconditioned by default (deployable). GLOBAL_CONDITION re-enables the dataset token (legacy).
             use_cond = bool(getattr(self.cfg.DATASET, "GLOBAL_CONDITION", False))
             dsid = self._batch_dataset_ids(batch, to_global.device) if use_cond else None
-            net_out_global = self.vae_global(to_global, dataset_id=dsid)
+            # Betas (shape) input — deployable: translation magnitude scales with leg length (GLOBAL_FEED_BETAS).
+            betas_in = None
+            if bool(getattr(self.cfg.DATASET, "GLOBAL_FEED_BETAS", False)):
+                _b = tar_beta[:, 0, :] if tar_beta.dim() == 3 else tar_beta
+                betas_in = _b[:, :10]   # raw-betas path (10-D)
+                if bool(getattr(self.cfg.DATASET, "GLOBAL_MEASURE", False)):
+                    m = self._betas_to_measurements(_b)   # FULL native betas -> limb measurements [B,3]
+                    betas_in = torch.cat([m, _b[:, :10]], dim=-1) if bool(
+                        getattr(self.cfg.DATASET, "GLOBAL_MEASURE_CAT", False)) else m   # cat -> [B,13]
+            net_out_global = self.vae_global(to_global, dataset_id=dsid, betas=betas_in)
             rec_global = net_out_global["rec_pose"]
             rec_local_vel = rec_global[:, :, 54:57]
 
