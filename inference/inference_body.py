@@ -194,6 +194,33 @@ MODALITY_BODY_IDX = 2  # Index of body motion modality
 # Main Generation Function
 # ============================================================================
 
+def global_measurements_from_betas(betas, smplx_model, device):
+    """Shape input for the shape-aware ("uncondMeasure") Global VAE: physical limb measurements in
+    meters (leg length, stature, hip width) from SMPL-X T-pose forward kinematics. Translation scales
+    with leg length, so this basis-free physical quantity lets the net set the right velocity gain for
+    the target body. Mirrors MultimodalTokenizer._betas_to_measurements. Returns [1, 3].
+
+    betas: [num_betas] or [1, num_betas]; zeros -> neutral body (a constant, harmless) offset."""
+    b = betas.reshape(1, -1).to(device).float()
+    nb = smplx_model.num_betas
+    b300 = torch.zeros(1, nb, device=device, dtype=torch.float32)
+    b300[:, :min(nb, b.shape[1])] = b[:, :min(nb, b.shape[1])]
+    z = lambda d: torch.zeros(1, d, device=device, dtype=torch.float32)
+    with torch.no_grad():
+        J = smplx_model(
+            betas=b300, transl=z(3), expression=z(smplx_model.num_expression_coeffs),
+            global_orient=z(3), body_pose=z(63), left_hand_pose=z(45), right_hand_pose=z(45),
+            jaw_pose=z(3), leye_pose=z(3), reye_pose=z(3), return_verts=False,
+        ).joints  # [1, nJ, 3], T-pose
+        L_hip, R_hip, L_knee, L_ankle, head, L_foot = (
+            J[:, 1], J[:, 2], J[:, 4], J[:, 7], J[:, 15], J[:, 10])
+        leg = (L_hip - L_knee).norm(dim=-1) + (L_knee - L_ankle).norm(dim=-1)
+        stature = (head[:, 1] - L_foot[:, 1]).abs()
+        hipw = (L_hip - R_hip).norm(dim=-1)
+        m = torch.stack([leg - 0.80, stature - 1.65, hipw - 0.19], dim=-1)  # meters, centered
+    return m.detach()
+
+
 def integrate_local_velocity(local_vel, global_orient_aa, init_pos=None):
     """
     Integrate root local velocity into world positions using global orientation.
@@ -221,7 +248,8 @@ def generate_motion_from_text(
     max_new_tokens=1024,
     temperature=0.0,
     top_p=0.1,
-    global_checkpoint=None
+    global_checkpoint=None,
+    body_betas=None
 ):
     """Generate motion and audio from text prompt using the trained model.
     
@@ -397,7 +425,16 @@ def generate_motion_from_text(
     # Set translation components to zero and replace with reconstructed global motion
     to_global[:, :, GLOBAL_TRANSLATION_START_IDX:GLOBAL_TRANSLATION_END_IDX] = 0.0
     to_global[:, :, :LOWER_BODY_FEATURE_DIM] = rec_lower2global
-    rec_global = vae_global(to_global)
+    # Shape-aware Global VAE: feed body measurements so translation scales to the target body. Only
+    # active when the loaded ckpt is the shape-aware variant (vae_global.feed_betas); default = None
+    # -> neutral body (a constant offset, identical to the legacy velocity-only behavior in practice).
+    if getattr(vae_global, "feed_betas", False):
+        _betas = (body_betas if body_betas is not None
+                  else torch.zeros(SMPLX_NUM_BETAS, device=device))
+        _measure = global_measurements_from_betas(_betas, smplx_2020, device)
+        rec_global = vae_global(to_global, betas=_measure)
+    else:
+        rec_global = vae_global(to_global)
 
     # ========================================================================
     # Calculate Translation from Velocities
@@ -410,8 +447,14 @@ def generate_motion_from_text(
     global_orient_aa = rec_pose[:, POSE_GLOBAL_ORIENT_INDICES[0]:POSE_GLOBAL_ORIENT_INDICES[1]]
     rec_trans = integrate_local_velocity(rec_trans_v_s[0], global_orient_aa).unsqueeze(0)
     
-    # Initialize shape parameters (betas) for SMPLX model
-    rec_beta = torch.zeros(SMPLX_NUM_BETAS, device=device)
+    # Initialize shape parameters (betas) for SMPLX model. When a target body shape is supplied,
+    # render with it (and the shape-aware Global VAE above scaled translation to match); else neutral.
+    if body_betas is not None:
+        rec_beta = torch.zeros(SMPLX_NUM_BETAS, device=device)
+        _bb = body_betas.reshape(-1).to(device).float()
+        rec_beta[:min(SMPLX_NUM_BETAS, _bb.shape[0])] = _bb[:SMPLX_NUM_BETAS]
+    else:
+        rec_beta = torch.zeros(SMPLX_NUM_BETAS, device=device)
 
     # Convert axis-angle rotations to 6D rotation representation
     rec_pose = rec_pose.to(device)
@@ -550,6 +593,14 @@ def main():
              'translation). Defaults to the built-in VAE_CHECKPOINT_GLOBAL.'
     )
     parser.add_argument(
+        '--body_betas',
+        type=str,
+        default=None,
+        help='Optional path to a .npy of SMPL-X betas for the target body shape. Used both to render '
+             'the mesh and, with the shape-aware Global VAE, to scale root translation to that body. '
+             'Omitted -> neutral body (identical to the default velocity-only behavior).'
+    )
+    parser.add_argument(
         '--output_dir',
         type=str,
         default="./test_output",
@@ -642,7 +693,14 @@ def main():
 
     model = base_model
     model.eval()
-    
+
+    # Optional target body shape (betas) for shape-aware translation + rendering
+    body_betas = None
+    if args.body_betas is not None:
+        import numpy as _np
+        body_betas = torch.from_numpy(_np.load(args.body_betas)).float()
+        print(f"  Loaded target body betas from {args.body_betas} (shape {tuple(body_betas.shape)})")
+
     # Generate motion from text
     generate_motion_from_text(
         model,
@@ -654,7 +712,8 @@ def main():
         max_new_tokens=args.max_new_tokens,
         temperature=args.temperature,
         top_p=args.top_p,
-        global_checkpoint=args.global_checkpoint
+        global_checkpoint=args.global_checkpoint,
+        body_betas=body_betas
     )
     
     print("\n=== Inference Completed Successfully ===")

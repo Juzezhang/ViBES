@@ -147,23 +147,36 @@ def load_vae_models(
         vae_quantizer_lambda=1,
         vae_test_dim=180
     )
+    # Load checkpoints
+    checkpoint = torch.load(checkpoint_main, map_location="cpu", weights_only=False)
+    checkpoint_face_data = torch.load(checkpoint_face, map_location="cpu", weights_only=False)
+    checkpoint_global_data = torch.load(checkpoint_global, map_location="cpu", weights_only=False)
+
+    # Extract state dictionaries
+    state_dict_old = _extract_state_dict(checkpoint, checkpoint_main)
+    state_dict_face_old = _extract_state_dict(checkpoint_face_data, checkpoint_face)
+    state_dict_global_old = _extract_state_dict(checkpoint_global_data, checkpoint_global)
+
+    # Auto-detect the shape-aware ("uncondMeasure") Global VAE: it carries a `beta_proj` layer that
+    # projects body measurements into a latent offset. If present, build the net with feed_betas so the
+    # weights load and the shape input is used; otherwise the vanilla velocity-only net (default ckpt).
+    global_feed_betas = any(k.endswith("beta_proj.weight") for k in state_dict_global_old.keys())
+    global_beta_dim = (
+        int(state_dict_global_old[next(k for k in state_dict_global_old if k.endswith("beta_proj.weight"))].shape[1])
+        if global_feed_betas else 10
+    )
     vae_global = VAEConvZero(
         vae_layer=4,
         code_num=256,
         codebook_size=256,
         vae_quantizer_lambda=1,
-        vae_test_dim=61
+        vae_test_dim=61,
+        feed_betas=global_feed_betas,
+        beta_dim=global_beta_dim,
     )
-    
-    # Load checkpoints
-    checkpoint = torch.load(checkpoint_main, map_location="cpu", weights_only=False)
-    checkpoint_face_data = torch.load(checkpoint_face, map_location="cpu", weights_only=False)
-    checkpoint_global_data = torch.load(checkpoint_global, map_location="cpu", weights_only=False)
-    
-    # Extract state dictionaries
-    state_dict_old = _extract_state_dict(checkpoint, checkpoint_main)
-    state_dict_face_old = _extract_state_dict(checkpoint_face_data, checkpoint_face)
-    state_dict_global_old = _extract_state_dict(checkpoint_global_data, checkpoint_global)
+    if global_feed_betas:
+        print(f"  Global VAE: shape-aware (beta_dim={global_beta_dim}); pass measurements at inference.")
+
     
     # Extract and rename state dict keys
     # Load state dictionaries (supports checkpoints with/without state_dict wrapper)
