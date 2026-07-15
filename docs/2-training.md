@@ -73,28 +73,6 @@ python -m training.train_tokenizer --cfg configs/config_global_vae_beat2amass.ya
 It trains the lower-body → root-velocity VAE for ~1000 epochs (cosine schedule) on the BEAT2 + AMASS
 lower-body parts; the resulting `last.ckpt` is the released Global VAE checkpoint above.
 
-### Shape-aware variant (recommended)
-
-Translation magnitude scales with **leg length** — the same joint-angle gait covers more ground for
-longer legs — so feeding the model a body-shape input improves translation accuracy while staying
-fully deployable (shape is known at inference; no dataset label is needed). The best variant feeds
-**physical limb measurements** (leg length, stature, hip width in meters, from SMPL-X T-pose FK over
-the native betas) as a zero-init latent offset, and fine-tunes from the released checkpoint:
-
-```bash
-python -m training.train_tokenizer --cfg configs/config_global_uncondMeasure.yaml --nodebug
-```
-
-Config gates (`DATASET.*`): `GLOBAL_FEED_BETAS` enables the shape input, `GLOBAL_MEASURE` switches it
-from raw 10-D betas to the 3-D measurements, `GLOBAL_FEED_CONTACTS` optionally keeps the foot-contact
-channels as input. The evaluation script mirrors them via env vars
-(`VIBES_EVAL_FEED_BETAS` / `VIBES_EVAL_MEASURE` / `VIBES_EVAL_FEED_CONTACTS`):
-
-```bash
-VIBES_EVAL_FEED_BETAS=1 VIBES_EVAL_MEASURE=1 \
-python -m scripts.eval_global_vae_translation --cfg configs/config_global_uncondMeasure.yaml
-```
-
 ---
 
 ## Stage 2 — SLB Model Training (LLM Expert)
@@ -166,10 +144,32 @@ deepspeed --include localhost:0,1,2,3 --master_port=29508 --master_addr=127.0.0.
     --glm_base_path THUDM/glm-4-voice-9b
 ```
 
-Swap `--tokenized_dataset` + `--output_dir` for the `text2motion` / `full` targets; all other flags
-match the face launcher table above. `train_vibes.py` freezes the text/audio Expert-0 and saves
+Swap `--tokenized_dataset` + `--output_dir` for the `full` target; all other flags match the face
+launcher table above. `train_vibes.py` freezes the text/audio Expert-0 and saves
 **Expert-1-only** (motion) checkpoints — the frozen Expert-0 is reconstructed from the GLM-4-Voice
 base at load (see the inference scripts' `--glm_base_path`).
+
+> **⚠️ `text2motion` needs a different motion vocab — pass `--mot_vocab_size 514`.** The co-speech
+> body targets tokenize motion as a **3-part split** (upper/lower/hand), so the motion expert's
+> vocabulary is `512 + 256 + 256 + 256 + 2 = 1282` (the default). HumanML3D text-to-motion instead
+> uses a **single full-body codebook**: 512 codes + `<|begin_of_motion|>`/`<|end_of_motion|>` =
+> **514**. The token ids and the motion-expert size must agree, so the `text2motion` target must be
+> launched with `--mot_vocab_size 514`; the default (1282) would mis-shape the motion embedding and
+> either fail to load a `text2motion` checkpoint or train an inconsistent one. Example:
+>
+> ```bash
+> deepspeed --include localhost:0,1,2,3 --master_port=29508 \
+>     training/train_vibes.py \
+>     --tokenized_dataset <OUT>/processed_h3d_text2motion_train/tokenized_dataset \
+>     --output_dir <OUT>/experiments/vibes_text2motion \
+>     --mot_vocab_size 514 \
+>     --batch_size 8 --learning_rate 1e-4 --epochs 20000000 \
+>     --layer_num 40 --save_steps 1000 --zero_stage 2 \
+>     --glm_base_path THUDM/glm-4-voice-9b
+> ```
+>
+> The same `--mot_vocab_size 514` applies to the 0.5B text-to-motion variant below (just swap the
+> config/base/`--layer_num`).
 
 > **`--zero_stage` (default 2).** ViBES's MoME is frozen-heavy: the ~19 GB text/audio Expert-0 never
 > updates and only the small motion expert trains. ZeRO-2 (params replicated, just the motion
