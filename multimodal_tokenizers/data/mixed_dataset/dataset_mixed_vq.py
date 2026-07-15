@@ -108,6 +108,12 @@ class MixedDatasetVQ(data.Dataset):
             self.maxdata = 100
         else:
             self.maxdata = 1e10
+        # Optional per-dataset segment cap (env VIBES_MAX_SEGMENTS) — fast, backfill-friendly directional
+        # runs (caps how many files are loaded before each dataset's segment count is reached).
+        import os as _os
+        _cap = _os.environ.get("VIBES_MAX_SEGMENTS")
+        if _cap not in (None, "", "0"):
+            self.maxdata = int(_cap)
 
         self.args = args
         self.dataset_configs = dataset_configs

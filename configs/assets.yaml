@@ -19,7 +19,9 @@ DATASET:
   BEAT2:
     ROOT: /path/to/BEAT2/beat_english_v2.0.0 # BEAT2 directory 
   AMASS:
-    ROOT: /path/to/AMASS # AMASS directory 
+    ROOT: /path/to/AMASS # AMASS directory
+  BONES:
+    ROOT: /path/to/BONES_parts_25 # optional — BONES-SEED (proprietary license) preprocessed like AMASS parts_25
   AMASS_talking:
     ROOT: /path/to/AMASS_talking # AMASS_talking directory 
   AMASS_P2P:
