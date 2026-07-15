@@ -73,6 +73,28 @@ python -m training.train_tokenizer --cfg configs/config_global_vae_beat2amass.ya
 It trains the lower-body → root-velocity VAE for ~1000 epochs (cosine schedule) on the BEAT2 + AMASS
 lower-body parts; the resulting `last.ckpt` is the released Global VAE checkpoint above.
 
+### Shape-aware variant (recommended)
+
+Translation magnitude scales with **leg length** — the same joint-angle gait covers more ground for
+longer legs — so feeding the model a body-shape input improves translation accuracy while staying
+fully deployable (shape is known at inference; no dataset label is needed). The best variant feeds
+**physical limb measurements** (leg length, stature, hip width in meters, from SMPL-X T-pose FK over
+the native betas) as a zero-init latent offset, and fine-tunes from the released checkpoint:
+
+```bash
+python -m training.train_tokenizer --cfg configs/config_global_uncondMeasure.yaml --nodebug
+```
+
+Config gates (`DATASET.*`): `GLOBAL_FEED_BETAS` enables the shape input, `GLOBAL_MEASURE` switches it
+from raw 10-D betas to the 3-D measurements, `GLOBAL_FEED_CONTACTS` optionally keeps the foot-contact
+channels as input. The evaluation script mirrors them via env vars
+(`VIBES_EVAL_FEED_BETAS` / `VIBES_EVAL_MEASURE` / `VIBES_EVAL_FEED_CONTACTS`):
+
+```bash
+VIBES_EVAL_FEED_BETAS=1 VIBES_EVAL_MEASURE=1 \
+python -m scripts.eval_global_vae_translation --cfg configs/config_global_uncondMeasure.yaml
+```
+
 ---
 
 ## Stage 2 — SLB Model Training (LLM Expert)
