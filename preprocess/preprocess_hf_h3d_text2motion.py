@@ -606,9 +606,14 @@ def main():
         tokenizer.pad_token = tokenizer.eos_token
     eos_token = tokenizer.eos_token
     
-    # Add special tokens for face, upper body, and lower body modalities
-    motion_tokens = [f"<|motion_{i}|>" for i in range(512)]
+    # Add special tokens for face, upper body, and lower body modalities.
+    # N_MOTION_VOCAB env lets an RVQ offset-vocab (8192 = 8 layers x 1024) register ALL its motion
+    # tokens; default 512 keeps the single-VQ pipeline unchanged. Unregistered <|motion_k|> get
+    # split into subword garbage -> wrong ids at motion positions -> device-side assert in train.
+    n_motion_vocab = int(os.environ.get("N_MOTION_VOCAB", "512"))
+    motion_tokens = [f"<|motion_{i}|>" for i in range(n_motion_vocab)]
     tokenizer.add_tokens(motion_tokens, special_tokens=False)
+    print(f"Registered {n_motion_vocab} <|motion_k|> tokens")
     tokenizer.add_tokens([f"<|begin_of_motion|>"], special_tokens=True)
     tokenizer.add_tokens([f"<|end_of_motion|>"], special_tokens=True)
     print(f"Extended tokenizer vocab size: {len(tokenizer)}")
