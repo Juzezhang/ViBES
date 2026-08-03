@@ -15,7 +15,7 @@ from torch.utils.data import Dataset, DataLoader
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from qwen_mome.modeling_qwen_mome import QwenMoMEForT2M, BEGIN, END
 
-H3D = '/path/to/HumanML3D'
+H3D = os.environ.get('H3D_ROOT', '/path/to/HumanML3D')
 N_MOT = 512
 TOKENS_DIR = 'TOKENS'
 
