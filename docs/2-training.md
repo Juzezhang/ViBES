@@ -2,7 +2,7 @@
 
 ViBES is trained in **two stages**: (1) train per-part VQ-VAE tokenizers, then (2) train the autoregressive SLB (speech-language-behavior) model on top of the discrete token vocabulary.
 
-> 🚧 **Status**: The face expert training pipeline is fully released. The body expert (Stage 2 over GENMO body tokens) is being prepared for release. See the [TODO list](../README.md#-todo-list).
+> **Status**: The face and body expert training pipelines are released (body: [Body Expert — three training targets](#body-expert--three-training-targets)). See the [TODO list](../README.md#-todo-list).
 
 ---
 

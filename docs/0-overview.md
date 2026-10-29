@@ -20,10 +20,13 @@ gdown --folder https://drive.google.com/drive/folders/1pASh6gc6skACDzLKfO8VllAUs
       --output ./model_files/pretrained_cpt
 ```
 
-The face Stage 2 expert is hosted separately on Hugging Face (see [README → Environment Setup](../README.md#-environment-setup)):
+The Stage 2 experts (see [README → Environment Setup](../README.md#-environment-setup)): face on
+Hugging Face, body on Google Drive for now.
 
 ```bash
 huggingface-cli download JuzeZhang/ViBES-Face --local-dir ./ViBES-Face
+gdown --folder https://drive.google.com/drive/folders/1GsoWZMcZYq-_IOYuKaWWu3bBZClV3E17 -O ./ViBES-Body-Cospeech
+gdown --folder https://drive.google.com/drive/folders/1EiN7n2anqbHaKXRj28bOZzIC955qrhhH -O ./ViBES-Body-Agent
 ```
 
 The table below lists every file in the Google Drive folder, in the same layout as `model_files/pretrained_cpt/`:

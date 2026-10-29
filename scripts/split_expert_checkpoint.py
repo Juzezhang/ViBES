@@ -19,7 +19,7 @@ from expert_io import filter_expert1_state_dict, load_state_dict_from_dir, write
 
 # Files that belong to the (discarded) full model / training state, not the per-expert model.
 _SKIP = {"model.safetensors.index.json", "optimizer.pt", "scheduler.pt", "rng_state.pth",
-         "trainer_state.json", "training_args.bin"}
+         "trainer_state.json", "training_args.bin", "latest", "zero_to_fp32.py"}
 
 
 def main():

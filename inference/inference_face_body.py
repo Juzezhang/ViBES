@@ -2,29 +2,33 @@
 """
 Combined inference script for Face + Body motion generation.
 
-Generates both facial expressions and body motion from text prompts using
+Generates both facial expressions and co-speech body motion from a text prompt using
 two separate models (face expert and body expert). Produces a single MP4
 video rendered from SMPLX2020 with combined face and body parameters.
 
 Pipeline:
-  1. Load face model -> generate audio + face tokens from text
-  2. Load body model -> generate body tokens (upper/lower/hand) from text
+  1. Face model -> speech (audio tokens) + face tokens from text
+  2. Body model -> body tokens (upper/lower/hand) driven by that speech (audio-to-motion), so the
+     gestures are synchronized with the speech in the video
   3. Decode audio tokens -> waveform
   4. Decode face tokens -> jaw pose, expressions
   5. Decode body tokens -> upper/lower body poses + global translation
   6. Merge face features (jaw, expressions) into full SMPLX body
   7. Render full body video (SMPLX, GENMO-style) with synchronized audio
 
+The two 9B models are loaded one after the other, so only one is on the GPU at a time.
+
 Usage:
-    python inference/inference_a2m_face_body.py \\
+    python inference/inference_face_body.py \\
         --checkpoint_face ./ViBES-Face \\
-        --checkpoint_body /path/to/body_checkpoint \\
+        --checkpoint_body ./ViBES-Body-Cospeech \\
         --user_text "If you had a superpower for one day, what would you choose?"
 """
 import sys
 import os
 import argparse
 import uuid
+import gc
 
 # Setup sys.path before other imports
 _script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -69,6 +73,7 @@ if os.path.exists(matcha_path):
 import torch
 import torch.nn.functional as F
 import numpy as np
+import soundfile as sf
 from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModel, AutoConfig
 from transformers.modeling_utils import load_sharded_checkpoint
@@ -97,13 +102,13 @@ from utils.genmo.vis.renderer import Renderer, get_global_cameras_static, get_gr
 from utils.genmo.camera import create_camera_sensor
 from utils.token_utils import extract_modality_tokens_from_response
 from utils.tensor_utils import apply_body_token_offset, inverse_selection_tensor
+from utils.motion_reconstruction import reconstruct_hand_pose
 from utils.model_loader import load_vae_models, load_smplx_model
-from utils.inference_utils import prepare_modality_masks, create_prompt
+from utils.inference_utils import prepare_modality_masks, create_prompt, generate_motion_from_audio_tokens
 
 from multimodal_tokenizers.archs.lom_vq import VQVAEConvZeroDSUS1_PaperVersion
 from multimodal_tokenizers.data.mixed_dataset.data_tools import (
     JOINT_MASK_UPPER,
-    JOINT_MASK_HANDS,
     JOINT_MASK_LOWER,
 )
 
@@ -164,8 +169,7 @@ VAE_CHECKPOINT_MAIN = './model_files/pretrained_cpt/body/lom_vq.ckpt'
 VAE_CHECKPOINT_FACE = os.path.join(CONVERSATIONAL_AGENT_DIR, 'model_files/pretrained_cpt/face/face.ckpt')
 VAE_CHECKPOINT_GLOBAL = os.environ.get(
     'VIBES_VAE_GLOBAL_CKPT',
-    os.path.join(ROOT_DIR, 'experiments', 'multimodal_tokenizer',
-                 'VAE_Global_from_Lower54', 'checkpoints', 'last.ckpt'),
+    os.path.join(ROOT_DIR, 'model_files', 'pretrained_cpt', 'VAE_Global_from_Lower54', 'last.ckpt'),
 )
 
 # SMPLX model path
@@ -275,7 +279,21 @@ def run_generation(model, tokenizer, device, user_text, body_part,
             body_part=body_part,
         )
 
-    # Apply token offset to motion tokens
+    return extract_tokens(tokenizer, output_ids, output_modality_masks)
+
+
+def run_audio_to_motion(model, tokenizer, device, audio_tokens, body_part,
+                        max_new_tokens=1024, temperature=0.1, top_p=0.1):
+    """Generate motion for the given speech (audio tokens) and return extracted modality tokens."""
+    output_ids, output_modality_masks = generate_motion_from_audio_tokens(
+        model, tokenizer, audio_tokens, body_part, device,
+        max_new_tokens=max_new_tokens, temperature=temperature, top_p=top_p,
+    )
+    return extract_tokens(tokenizer, output_ids, output_modality_masks)
+
+
+def extract_tokens(tokenizer, output_ids, output_modality_masks):
+    """Shift motion token ids back to codebook ids and split the response by modality."""
     output_ids = apply_body_token_offset(
         output_ids, output_modality_masks, TOKEN_OFFSET, modality_idx=MODALITY_MOTION_IDX
     )
@@ -286,13 +304,20 @@ def run_generation(model, tokenizer, device, user_text, body_part,
     return extract_modality_tokens_from_response(full_response)
 
 
+def free_gpu_memory():
+    """Release cached GPU memory after a model has been deleted, before the next one is loaded."""
+    gc.collect()
+    torch.cuda.empty_cache()
+
+
 def reconstruct_body_pose_with_face(rec_upper, rec_lower, rec_pose_jaw_6d,
-                                    batch_size, num_frames, device):
+                                    batch_size, num_frames, device, rec_hand=None):
     """
     Reconstruct full body pose from body parts, using jaw from face model.
 
     Unlike reconstruct_full_body_pose(), this uses the actual jaw rotation
-    from the face model instead of zeroing it out.
+    from the face model instead of zeroing it out. Hands come from the hand VAE
+    (rec_hand, 30 joints * 6D); None keeps them in rest pose.
     """
     # Upper body: 13 joints * 6D -> axis-angle -> full 165D
     pose_upper = rec_upper.reshape(batch_size, num_frames, 13, 6)
@@ -307,9 +332,8 @@ def reconstruct_body_pose_with_face(rec_upper, rec_lower, rec_pose_jaw_6d,
     pose_lower = matrix_to_axis_angle(pose_lower_mat).reshape(batch_size * num_frames, 9 * 3)
     pose_lower_full = inverse_selection_tensor(pose_lower, JOINT_MASK_LOWER, batch_size * num_frames)
 
-    # Hands: zeros (hand VAE output not yet used for pose reconstruction)
-    pose_hands = torch.zeros(batch_size * num_frames, 30 * 3, device=device)
-    pose_hands_full = inverse_selection_tensor(pose_hands, JOINT_MASK_HANDS, batch_size * num_frames)
+    # Hands: 30 joints * 6D -> axis-angle -> full 165D
+    pose_hands_full = reconstruct_hand_pose(rec_hand, batch_size, num_frames, device)
 
     # Jaw: from face model (actual rotation, not zeros)
     jaw_aa = rotation_6d_to_axis_angle(
@@ -328,10 +352,12 @@ def reconstruct_body_pose_with_face(rec_upper, rec_lower, rec_pose_jaw_6d,
 # ============================================================================
 
 def generate_face_body_from_text(
-    model_face,
-    model_body,
+    checkpoint_face,
+    checkpoint_body,
     tokenizer,
+    tokenizer_path,
     device,
+    glm_base_path="THUDM/glm-4-voice-9b",
     user_text="If you had a superpower for one day, what would you choose?",
     output_dir="./demo",
     output_prefix="response",
@@ -346,6 +372,9 @@ def generate_face_body_from_text(
 ):
     """
     Generate synchronized face and body motion from text.
+
+    The face model answers the text with speech + face tokens; the body model then generates
+    co-speech gestures for that speech (audio-to-motion). The models are loaded one at a time.
 
     Returns:
         True if generation succeeded
@@ -373,11 +402,14 @@ def generate_face_body_from_text(
     # ========================================================================
     # Step 1: Generate face tokens + audio tokens
     # ========================================================================
-    print("\n=== Generating Face Tokens ===")
+    print(f"\n=== Generating Speech + Face Tokens ({checkpoint_face}) ===")
+    model_face = load_model(tokenizer_path, checkpoint_face, device, glm_base_path)
     face_modality_tokens = run_generation(
         model_face, tokenizer, device, user_text, body_part="face",
         max_new_tokens=max_new_tokens, temperature=temperature_face, top_p=top_p_face,
     )
+    del model_face
+    free_gpu_memory()
     audio_tokens = face_modality_tokens['audio']
     face_tokens = face_modality_tokens['face']
     print(f"  audio tokens: {len(audio_tokens)}, face tokens: {len(face_tokens)}")
@@ -385,11 +417,14 @@ def generate_face_body_from_text(
     # ========================================================================
     # Step 2: Generate body tokens
     # ========================================================================
-    print("\n=== Generating Body Tokens ===")
-    body_modality_tokens = run_generation(
-        model_body, tokenizer, device, user_text, body_part="body",
+    print(f"\n=== Generating Co-speech Body Tokens for that speech ({checkpoint_body}) ===")
+    model_body = load_model(tokenizer_path, checkpoint_body, device, glm_base_path)
+    body_modality_tokens = run_audio_to_motion(
+        model_body, tokenizer, device, audio_tokens, body_part="body",
         max_new_tokens=max_new_tokens, temperature=temperature_body, top_p=top_p_body,
     )
+    del model_body
+    free_gpu_memory()
     upper_tokens = body_modality_tokens['upper']
     lower_tokens = body_modality_tokens['lower']
     hand_tokens = body_modality_tokens['hand']
@@ -465,7 +500,7 @@ def generate_face_body_from_text(
 
     # Reconstruct full body pose with jaw from face model
     rec_pose, rec_lower2global = reconstruct_body_pose_with_face(
-        rec_upper, rec_lower, rec_jaw_6d_aligned, bs, n, device
+        rec_upper, rec_lower, rec_jaw_6d_aligned, bs, n, device, rec_hand=rec_hand[:, :n, :]
     )
 
     # ========================================================================
@@ -523,6 +558,10 @@ def generate_face_body_from_text(
         mocap_frame_rate=MOTION_FPS,
     )
     print(f"  Motion parameters saved to {npz_path}")
+    wav_path = os.path.join(output_dir, f"{output_prefix}.wav")
+    sf.write(wav_path, final_speech[:int(n / MOTION_FPS * AUDIO_OUTPUT_SAMPLE_RATE)].numpy(),
+             AUDIO_OUTPUT_SAMPLE_RATE)
+    print(f"  Speech saved to {wav_path}")
 
     # ========================================================================
     # Step 9: Render video (SMPLX)
@@ -580,6 +619,7 @@ def generate_face_body_from_text(
     print(f"\n=== Done ===")
     print(f"  Video:      {video_path}")
     print(f"  Motion NPZ: {npz_path}")
+    print(f"  Speech:     {wav_path}")
 
     return True
 
@@ -596,7 +636,7 @@ def main():
     parser.add_argument('--checkpoint_face', type=str, default="./ViBES-Face",
                         help='Path to face model checkpoint directory')
     parser.add_argument('--checkpoint_body', type=str,
-                        default=os.environ.get('VIBES_BODY_CKPT', './ViBES-Body'),
+                        default=os.environ.get('VIBES_BODY_CKPT', './ViBES-Body-Cospeech'),
                         help='Path to body model checkpoint directory')
     parser.add_argument('--glm_base_path', type=str, default="THUDM/glm-4-voice-9b",
                         help='GLM-4-Voice base used to reconstruct the frozen text/audio expert '
@@ -609,7 +649,7 @@ def main():
                         default="If you had a superpower for one day, what would you choose?",
                         help='User input text prompt')
     parser.add_argument('--output_prefix', type=str, default="response",
-                        help='Prefix for output filenames (produces <prefix>.mp4, <prefix>.npz)')
+                        help='Prefix for output filenames (produces <prefix>.mp4, <prefix>.npz, <prefix>.wav)')
     parser.add_argument('--max_new_tokens', type=int, default=1024,
                         help='Maximum number of tokens to generate per model')
     parser.add_argument('--temperature_face', type=float, default=0.2,
@@ -648,17 +688,10 @@ def main():
     tokenizer_path = os.path.join(ROOT_DIR, "vibes")
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
 
-    # Load face model
-    print(f"\n=== Step 2: Load Face Model from {args.checkpoint_face} ===")
-    model_face = load_model(tokenizer_path, args.checkpoint_face, device, args.glm_base_path)
-
-    # Load body model
-    print(f"\n=== Step 3: Load Body Model from {args.checkpoint_body} ===")
-    model_body = load_model(tokenizer_path, args.checkpoint_body, device, args.glm_base_path)
-
-    # Generate
+    # Generate (the face and body models are loaded one at a time inside)
     generate_face_body_from_text(
-        model_face, model_body, tokenizer, device,
+        args.checkpoint_face, args.checkpoint_body, tokenizer, tokenizer_path, device,
+        glm_base_path=args.glm_base_path,
         user_text=args.user_text,
         output_dir=args.output_dir,
         output_prefix=args.output_prefix,

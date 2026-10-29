@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Body-only inference script (no face, no hand decoding).
+Body-only inference script (no face).
 
 Generates body motion (upper + lower + hand tokens) from text prompts using
 a single body model checkpoint. Produces an MP4 video rendered from SMPLX
@@ -94,13 +94,13 @@ from utils.genmo.vis.renderer import Renderer, get_global_cameras_static, get_gr
 from utils.genmo.camera import create_camera_sensor
 from utils.token_utils import extract_modality_tokens_from_response
 from utils.tensor_utils import apply_body_token_offset, inverse_selection_tensor
+from utils.motion_reconstruction import reconstruct_hand_pose
 from utils.model_loader import load_smplx_model
 from utils.inference_utils import prepare_modality_masks, create_prompt
 
 from multimodal_tokenizers.archs.lom_vq import VQVAEConvZeroDSUS_PaperVersion, VAEConvZero
 from multimodal_tokenizers.data.mixed_dataset.data_tools import (
     JOINT_MASK_UPPER,
-    JOINT_MASK_HANDS,
     JOINT_MASK_LOWER,
 )
 
@@ -264,10 +264,11 @@ def run_generation(model, tokenizer, device, user_text, body_part,
     return extract_modality_tokens_from_response(full_response)
 
 
-def reconstruct_body_pose(rec_upper, rec_lower, batch_size, num_frames, device):
+def reconstruct_body_pose(rec_upper, rec_lower, batch_size, num_frames, device, rec_hand=None):
     """
     Reconstruct full body pose from upper + lower body parts.
-    Jaw and hands are set to zero (no face model).
+    Jaw is set to zero (no face model). Hands come from the hand VAE (rec_hand,
+    30 joints * 6D); None keeps them in rest pose.
     """
     # Upper body: 13 joints * 6D -> axis-angle -> full 165D
     pose_upper = rec_upper.reshape(batch_size, num_frames, 13, 6)
@@ -282,9 +283,8 @@ def reconstruct_body_pose(rec_upper, rec_lower, batch_size, num_frames, device):
     pose_lower = matrix_to_axis_angle(pose_lower_mat).reshape(batch_size * num_frames, 9 * 3)
     pose_lower_full = inverse_selection_tensor(pose_lower, JOINT_MASK_LOWER, batch_size * num_frames)
 
-    # Hands: zeros
-    pose_hands = torch.zeros(batch_size * num_frames, 30 * 3, device=device)
-    pose_hands_full = inverse_selection_tensor(pose_hands, JOINT_MASK_HANDS, batch_size * num_frames)
+    # Hands: 30 joints * 6D -> axis-angle -> full 165D
+    pose_hands_full = reconstruct_hand_pose(rec_hand, batch_size, num_frames, device)
 
     # Combine (jaw stays zero)
     rec_pose = pose_upper_full + pose_lower_full + pose_hands_full
@@ -397,7 +397,7 @@ def generate_body_from_text(
     print("\n=== Reconstructing Body Pose ===")
     bs = 1
     rec_pose, rec_lower2global = reconstruct_body_pose(
-        rec_upper, rec_lower, bs, n, device
+        rec_upper, rec_lower, bs, n, device, rec_hand=rec_hand[:, :n, :]
     )
 
     # ========================================================================
