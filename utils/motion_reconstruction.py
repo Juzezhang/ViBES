@@ -77,13 +77,40 @@ def reconstruct_lower_body_pose(
     return rec_pose_lower_recover, rec_lower2global
 
 
+def reconstruct_hand_pose(
+    rec_hand: torch.Tensor,
+    batch_size: int,
+    num_frames: int,
+    device: torch.device
+) -> torch.Tensor:
+    """
+    Reconstruct both hands from 6D rotations.
+
+    Args:
+        rec_hand: Hand VAE output with shape (batch_size, num_frames, 30*6), or None for rest pose
+        batch_size: Batch size
+        num_frames: Number of frames
+        device: Device to perform computations on
+
+    Returns:
+        Reconstructed hand pose with shape (batch_size * num_frames, 165)
+    """
+    if rec_hand is None:
+        rec_pose_hands = torch.zeros(batch_size * num_frames, 30 * 3, device=device)
+    else:
+        rec_pose_hands = rec_hand[:, :num_frames].reshape(batch_size, num_frames, 30, 6)
+        rec_pose_hands = rotation_6d_to_axis_angle(rec_pose_hands).reshape(batch_size * num_frames, 30 * 3)
+    return inverse_selection_tensor(rec_pose_hands.to(device), JOINT_MASK_HANDS, batch_size * num_frames)
+
+
 def reconstruct_full_body_pose(
     rec_upper: torch.Tensor,
     rec_lower: torch.Tensor,
     rec_pose_jaw: torch.Tensor,
     batch_size: int,
     num_frames: int,
-    device: torch.device
+    device: torch.device,
+    rec_hand: torch.Tensor = None
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Reconstruct full body pose from individual body parts.
@@ -95,6 +122,7 @@ def reconstruct_full_body_pose(
         batch_size: Batch size
         num_frames: Number of frames
         device: Device to perform computations on
+        rec_hand: Hand VAE output with shape (batch_size, num_frames, 30*6); None keeps the hands in rest pose
         
     Returns:
         Tuple of (full_body_pose, lower_to_global_rotation)
@@ -105,8 +133,7 @@ def reconstruct_full_body_pose(
     rec_pose_legs = rec_lower[:, :, :54]
     rec_pose_lower_recover, rec_lower2global = reconstruct_lower_body_pose(rec_pose_legs, batch_size, num_frames)
     
-    rec_pose_hands = torch.zeros(batch_size * num_frames, 30 * 3, device=device)
-    rec_pose_hands_recover = inverse_selection_tensor(rec_pose_hands, JOINT_MASK_HANDS, batch_size * num_frames)
+    rec_pose_hands_recover = reconstruct_hand_pose(rec_hand, batch_size, num_frames, device)
     
     rec_pose_jaw = rec_pose_jaw.reshape(batch_size * num_frames, 6)
     rec_pose_jaw = 0 * rotation_6d_to_axis_angle(rec_pose_jaw).reshape(batch_size * num_frames, 1 * 3)
