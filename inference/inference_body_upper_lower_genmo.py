@@ -115,7 +115,10 @@ from utils.genmo.smplx_utils import make_smplx
 from utils.token_utils import extract_modality_tokens_from_response
 from utils.tensor_utils import apply_body_token_offset, inverse_selection_tensor
 from utils.model_loader import load_smplx_model, extract_state_dict_keys, _extract_state_dict, _load_module_state
-from utils.inference_utils import prepare_modality_masks, create_prompt
+from utils.inference_utils import (
+    prepare_modality_masks, create_prompt,
+    tokenize_audio_file, load_audio_waveform, generate_motion_from_audio_tokens,
+)
 
 from multimodal_tokenizers.archs.lom_vq import VQVAEConvZeroDSUS_PaperVersion
 from multimodal_tokenizers.archs.motiongpt_vq import MotionGPTVQVaeAdapter
@@ -347,7 +350,10 @@ def generate_motion_from_text(
     output_filename="response.mp4",
     max_new_tokens=1024,
     temperature=0.0,
-    top_p=0.1
+    top_p=0.1,
+    audio_path=None,
+    audio_tokenizer_path="THUDM/glm-4-voice-tokenizer",
+    agent=False
 ):
     """Generate motion and audio from text prompt using the trained model.
 
@@ -382,35 +388,43 @@ def generate_motion_from_text(
     # Load VAE models (upper + lower_genmo only)
     vae_upper, vae_lower = load_upper_lower_genmo_vae_models(device)
 
-    # Prepare input prompt with proper formatting
-    prompt = create_prompt(user_text)
-
-    # Tokenize input text
-    inputs = tokenizer([prompt], return_tensors="pt").to(device)
-    print(f"Starting generation...")
-    original_text = tokenizer.decode(inputs['input_ids'][0], skip_special_tokens=False)
-    print(f"Original text: {original_text}")
-
-    # Prepare modality masks for multimodal generation
-    batch_size, seq_len = inputs.input_ids.shape[0], inputs.input_ids.shape[1]
-    modality_masks_original, position_encoding_indices = prepare_modality_masks(
-        batch_size, seq_len, num_modalities=NUM_MODALITIES, device=inputs.input_ids.device
-    )
-
-    # Generate multimodal tokens (text, audio, motion)
-    with torch.no_grad():
-        output_ids, output_modality_masks = model.generate(
-            input_ids=inputs.input_ids,
-            attention_mask=inputs.attention_mask,
-            max_new_tokens=max_new_tokens,
-            do_sample=True,
-            temperature=temperature,
-            top_p=top_p,
-            modality_masks=modality_masks_original,
-            use_cache=True,
-            position_encoding_indices=position_encoding_indices,
-            body_part="upper_lower_genmo"
+    if audio_path is not None:
+        # Audio-to-motion: condition on the given speech instead of generating speech from text
+        print(f"Audio-to-motion from: {audio_path}")
+        output_ids, output_modality_masks = generate_motion_from_audio_tokens(
+            model, tokenizer, tokenize_audio_file(audio_path, device, audio_tokenizer_path),
+            "upper_lower_genmo", device, max_new_tokens=max_new_tokens, temperature=temperature, top_p=top_p
         )
+    else:
+        # Prepare input prompt with proper formatting
+        prompt = create_prompt(user_text, agent=agent)
+
+        # Tokenize input text
+        inputs = tokenizer([prompt], return_tensors="pt").to(device)
+        print(f"Starting generation...")
+        original_text = tokenizer.decode(inputs['input_ids'][0], skip_special_tokens=False)
+        print(f"Original text: {original_text}")
+
+        # Prepare modality masks for multimodal generation
+        batch_size, seq_len = inputs.input_ids.shape[0], inputs.input_ids.shape[1]
+        modality_masks_original, position_encoding_indices = prepare_modality_masks(
+            batch_size, seq_len, num_modalities=NUM_MODALITIES, device=inputs.input_ids.device
+        )
+
+        # Generate multimodal tokens (text, audio, motion)
+        with torch.no_grad():
+            output_ids, output_modality_masks = model.generate(
+                input_ids=inputs.input_ids,
+                attention_mask=inputs.attention_mask,
+                max_new_tokens=max_new_tokens,
+                do_sample=True,
+                temperature=temperature,
+                top_p=top_p,
+                modality_masks=modality_masks_original,
+                use_cache=True,
+                position_encoding_indices=position_encoding_indices,
+                body_part="upper_lower_genmo"
+            )
 
     # Apply body token offset to correct token IDs
     output_ids = apply_body_token_offset(
@@ -438,28 +452,32 @@ def generate_motion_from_text(
     # Audio Decoding
     # ========================================================================
 
-    # Prepare audio decoder with empty prompts for zero-shot generation
-    this_uuid = str(uuid.uuid4())
-    prompt_speech_feat = torch.zeros(1, 0, AUDIO_MEL_DIM).to(device)
-    flow_prompt_speech_token = torch.zeros(1, 0, dtype=torch.int64).to(device)
+    if audio_path is not None:
+        # a2m: the soundtrack is the input speech itself
+        final_speech = load_audio_waveform(audio_path, AUDIO_OUTPUT_SAMPLE_RATE)
+    else:
+        # Prepare audio decoder with empty prompts for zero-shot generation
+        this_uuid = str(uuid.uuid4())
+        prompt_speech_feat = torch.zeros(1, 0, AUDIO_MEL_DIM).to(device)
+        flow_prompt_speech_token = torch.zeros(1, 0, dtype=torch.int64).to(device)
 
-    audio_decoder = AudioDecoder(
-        config_path=AUDIO_DECODER_CONFIG,
-        flow_ckpt_path=AUDIO_DECODER_FLOW,
-        hift_ckpt_path=AUDIO_DECODER_HIFT,
-        device=device
-    )
+        audio_decoder = AudioDecoder(
+            config_path=AUDIO_DECODER_CONFIG,
+            flow_ckpt_path=AUDIO_DECODER_FLOW,
+            hift_ckpt_path=AUDIO_DECODER_HIFT,
+            device=device
+        )
 
-    # Decode audio tokens to waveform
-    tts_token = torch.tensor(audio_tokens, device=device).unsqueeze(0)
-    tts_speech, tts_mel = audio_decoder.token2wav(
-        tts_token,
-        uuid=this_uuid,
-        prompt_token=flow_prompt_speech_token.to(device),
-        prompt_feat=prompt_speech_feat.to(device),
-        finalize=True
-    )
-    final_speech = tts_speech[0].cpu()
+        # Decode audio tokens to waveform
+        tts_token = torch.tensor(audio_tokens, device=device).unsqueeze(0)
+        tts_speech, tts_mel = audio_decoder.token2wav(
+            tts_token,
+            uuid=this_uuid,
+            prompt_token=flow_prompt_speech_token.to(device),
+            prompt_feat=prompt_speech_feat.to(device),
+            finalize=True
+        )
+        final_speech = tts_speech[0].cpu()
 
     # ========================================================================
     # Motion Token Decoding
@@ -654,6 +672,25 @@ def main():
         help='User input text prompt for motion generation'
     )
     parser.add_argument(
+        '--audio',
+        type=str,
+        default=None,
+        help='Audio-to-motion: path to a speech file. When set, motion is generated for this audio '
+             '(no TTS) and --user_text is ignored.'
+    )
+    parser.add_argument(
+        '--audio_tokenizer',
+        type=str,
+        default="THUDM/glm-4-voice-tokenizer",
+        help='GLM-4-Voice speech tokenizer (HF id or local dir), used with --audio'
+    )
+    parser.add_argument(
+        '--agent',
+        action='store_true',
+        help='Instruction-following (agent) prompt: the model performs the motion that --user_text '
+             'asks for while answering. Use with the ViBES-Body-Agent checkpoint; ignored with --audio.'
+    )
+    parser.add_argument(
         '--output_filename',
         type=str,
         default="response.mp4",
@@ -738,7 +775,10 @@ def main():
         output_filename=args.output_filename,
         max_new_tokens=args.max_new_tokens,
         temperature=args.temperature,
-        top_p=args.top_p
+        top_p=args.top_p,
+        audio_path=args.audio,
+        audio_tokenizer_path=args.audio_tokenizer,
+        agent=args.agent
     )
 
     print("\n=== Inference Completed Successfully ===")

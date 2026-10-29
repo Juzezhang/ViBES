@@ -14,12 +14,13 @@ ViBES is a speech-language-behavior (SLB) model with a mixture-of-modality-exper
 
 ### Model variants
 
-ViBES comes in two sizes that differ only in the speech/text backbone (the frozen Expert-0); the motion experts are the same:
+The speech models come in two sizes that differ only in the frozen speech/text backbone (Expert-0); the motion experts are the same. The same motion-expert design on a frozen text-only LLM gives a text-to-motion model:
 
-| Variant | Speech/text backbone (Expert-0) | Notes |
+| Variant | Frozen backbone (Expert-0) | Notes |
 |---|---|---|
-| **ViBES (9B)** | [GLM-4-Voice-9B](https://huggingface.co/THUDM/glm-4-voice-9b) | best quality |
+| **ViBES (9B)** | [GLM-4-Voice-9B](https://huggingface.co/THUDM/glm-4-voice-9b) | speech + face/body, best quality |
 | **ViBES (0.5B)** | [ViBES-Audio](https://huggingface.co/JuzeZhang/ViBES-Audio) — our distilled 0.5B GLM-4-Voice | ~15× smaller backbone, low-latency / on-device |
+| **ViBES-T2M (Qwen-MoME)** | [Qwen3-1.7B](https://huggingface.co/Qwen/Qwen3-1.7B) (text only) | text-to-motion on HumanML3D (R@1 0.486, FID 0.265); [`qwen_mome/`](qwen_mome/README.md), weights at [`JuzeZhang/ViBES-T2M`](https://huggingface.co/JuzeZhang/ViBES-T2M) |
 
 
 ## ✅ TODO List
@@ -27,9 +28,10 @@ ViBES comes in two sizes that differ only in the speech/text backbone (the froze
 - [x] Initial code release
 - [x] Inference code for conversational behavior of facial expressions
 - [x] Inference code for conversational behavior of body — `inference/inference_body.py` (upper+hands+lower via compositional VQs; global translation reconstructed by the Global VAE from lower-body pose and may drift on long sequences). A GENMO-representation upgrade for stable translation is in progress; combined face+body inference: `inference/inference_face_body.py`.
+- [x] Body checkpoints — co-speech (`ViBES-Body-Cospeech`) and agent (`ViBES-Body-Agent`, `--agent`), on Google Drive (links in [Environment Setup](#-environment-setup))
 - [x] Text-to-motion (HumanML3D) — ViBES motion expert on a frozen Qwen3-1.7B, [`qwen_mome/`](qwen_mome/README.md), weights at [`JuzeZhang/ViBES-T2M`](https://huggingface.co/JuzeZhang/ViBES-T2M)
 - [x] Training code for face expert
-- [ ] Training code for body expert
+- [x] Training code for body expert
 - [x] Dataset release (facial part)
 - [ ] Dataset release (body part)
 - [ ] Dataset preprocessing
@@ -83,7 +85,18 @@ huggingface-cli download THUDM/glm-4-voice-9b --local-dir ./model_files/glm-4-vo
 # Download our pretrained face model
 # (motion expert only, ~0.86 GB; the frozen text/audio expert is reconstructed from the GLM base at load)
 huggingface-cli download JuzeZhang/ViBES-Face --local-dir ./ViBES-Face
+
+# Download the body experts (co-speech + agent, motion expert only, ~0.86 GB each)
+pip install gdown
+gdown --folder https://drive.google.com/drive/folders/1GsoWZMcZYq-_IOYuKaWWu3bBZClV3E17 -O ./ViBES-Body-Cospeech
+gdown --folder https://drive.google.com/drive/folders/1EiN7n2anqbHaKXRj28bOZzIC955qrhhH -O ./ViBES-Body-Agent
 ```
+
+The body experts are on Google Drive for now ([co-speech](https://drive.google.com/drive/folders/1GsoWZMcZYq-_IOYuKaWWu3bBZClV3E17),
+[agent](https://drive.google.com/drive/folders/1EiN7n2anqbHaKXRj28bOZzIC955qrhhH)); a Hugging Face mirror will follow. The Stage-1 tokenizers are in the
+Google Drive folder listed in [docs/0-overview.md](docs/0-overview.md), the text-to-motion weights in
+[`JuzeZhang/ViBES-T2M`](https://huggingface.co/JuzeZhang/ViBES-T2M) and the 0.5B backbone in
+[`JuzeZhang/ViBES-Audio`](https://huggingface.co/JuzeZhang/ViBES-Audio).
 
 **Notes:**
 - FlashAttention compilation may take 10-30 minutes
@@ -97,19 +110,26 @@ For SMPL-X / FLAME body models, sign up on https://smpl-x.is.tue.mpg.de and http
 ## 🚀 Quick Start
 
 <details open>
-<summary><b>Conversation with Text input</b></summary>
+<summary><b>Conversation with text input — speech, face and co-speech body</b></summary>
 
 ```bash
-python inference/inference_face.py \
-    --checkpoint ./ViBES-Face \
+python inference/inference_face_body.py \
+    --checkpoint_face ./ViBES-Face \
+    --checkpoint_body ./ViBES-Body-Cospeech \
     --glm_base_path ./model_files/glm-4-voice-9b \
-    --user_text "If you had a superpower for one day, what would you choose?"
+    --user_text "If you had a superpower for one day, what would you choose?" \
+    --output_dir ./results/face_body --front_view
 ```
 
-> `--checkpoint ./ViBES-Face` is our pretrained face model (downloaded above; this is also the
-> default). It ships the trained **motion expert only** — the frozen text/audio expert is
-> reconstructed from the GLM-4-Voice base, so pass `--glm_base_path` to point at the base you
-> downloaded above (it defaults to `THUDM/glm-4-voice-9b`, which auto-downloads to the HF cache).
+The face expert answers with speech and facial expressions. The co-speech body expert then generates
+gestures for that speech, so body, face and audio stay in sync. Both checkpoints ship the trained
+**motion expert only**: the frozen text/audio expert is rebuilt from the GLM-4-Voice base given by
+`--glm_base_path` (default `THUDM/glm-4-voice-9b`, auto-downloaded to the HF cache). The two models are
+loaded one after the other, so only one 9B model is on the GPU at a time.
+
+Outputs in `--output_dir`: `<prefix>.mp4` (SMPL-X render with the speech), `<prefix>.npz` (SMPL-X
+`poses` / `expressions` / `trans`, 25 fps) and `<prefix>.wav`. Face-only, body-only, audio-driven and
+agent (`--agent`) runs are covered in [docs/3-inference.md](docs/3-inference.md).
 
 Demo output
 
