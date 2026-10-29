@@ -27,6 +27,7 @@ ViBES comes in two sizes that differ only in the speech/text backbone (the froze
 - [x] Initial code release
 - [x] Inference code for conversational behavior of facial expressions
 - [x] Inference code for conversational behavior of body — `inference/inference_body.py` (upper+hands+lower via compositional VQs; global translation reconstructed by the Global VAE from lower-body pose and may drift on long sequences). A GENMO-representation upgrade for stable translation is in progress; combined face+body inference: `inference/inference_face_body.py`.
+- [x] Text-to-motion (HumanML3D) — ViBES motion expert on a frozen Qwen3-1.7B, [`qwen_mome/`](qwen_mome/README.md), weights at [`JuzeZhang/ViBES-T2M`](https://huggingface.co/JuzeZhang/ViBES-T2M)
 - [x] Training code for face expert
 - [ ] Training code for body expert
 - [x] Dataset release (facial part)
