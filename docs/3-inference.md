@@ -1,6 +1,6 @@
 # Inference
 
-Run trained ViBES models to generate conversational facial expressions, body motion, and tokenize/decode audio.
+Run trained ViBES models to generate conversational facial expressions, body motion, and text-to-motion, and to tokenize/decode audio.
 
 ## Face Inference (Main Demo)
 
@@ -122,6 +122,40 @@ The conditioning mode is set by the system message passed to `create_prompt`
 - **Instruction + cospeech** — the model is additionally told to *embody and perform* the requested
   motion while speaking (first-person, "imagine you have a body and are already moving …"). Pass this
   longer system message via `create_prompt(user_text, system_message=...)`.
+
+---
+
+## Text-to-Motion (HumanML3D)
+
+Plain text → motion on the HumanML3D benchmark (263-D features, MotionGPT VQ-VAE tokens). The
+released model, **ViBES-T2M** ([`JuzeZhang/ViBES-T2M`](https://huggingface.co/JuzeZhang/ViBES-T2M)),
+puts a ViBES motion expert (~0.27B trainable) on a fully frozen Qwen3-1.7B. It lives in
+[`qwen_mome/`](../qwen_mome/README.md) and needs `transformers` ≥ 4.51 (Qwen3), so it runs in its own
+environment rather than the ViBES one.
+
+```bash
+python -m qwen_mome.generate_t2m \
+    --ckpt ./ViBES-T2M/vibes_t2m_qwen_mome_1p7b.pt \
+    --vq_ckpt /path/to/MotionGPT/checkpoints/MotionGPT-base/motiongpt_s3_h3d.tar \
+    --meta_dir /path/to/MotionGPT/deps/t2m/t2m/t2m/Comp_v6_KLD01/meta \
+    --text "a person walks forward, then squats down" \
+    --out_dir ./results/t2m
+```
+
+Output per caption: `NN_motion.npy` (263-D), `NN_joints.npy` (`[T, 22, 3]`, 20 fps) and a skeleton
+`NN.gif`.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--ckpt` | (required) | `vibes_t2m_qwen_mome_1p7b.pt` from the HF repo |
+| `--vq_ckpt` | (required) | MotionGPT's `motiongpt_s3_h3d.tar` (HF `OpenMotionLab/MotionGPT-base`) |
+| `--meta_dir` | (required) | `Comp_v6_KLD01/meta` (mean/std) from MotionGPT's `prepare/download_t2m_evaluators.sh` |
+| `--text` | (required) | One or more captions |
+| `--cfg_scale` | `3.0` | Classifier-free guidance scale |
+| `--temperature` / `--top_p` | `0.7` / `0.9` | Sampling; `--greedy` for argmax decoding |
+
+HumanML3D test results (R@1 0.486 / R@3 0.769 / FID 0.265 / MM-Dist 3.196) and training notes are in
+[`qwen_mome/README.md`](../qwen_mome/README.md).
 
 ---
 
