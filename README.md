@@ -133,9 +133,9 @@ agent (`--agent`) runs are covered in [docs/3-inference.md](docs/3-inference.md)
 
 Demo output
 
-https://github.com/user-attachments/assets/cd0191fa-394d-4476-aec7-c8aed7fe1690
+https://github.com/user-attachments/assets/2ecc0816-e0cb-462c-9dcf-e3a6001ad429
 
-*Example output showing conversational facial animation with synchronized audio*
+*Example output of the command above: speech, face and co-speech body (hands included), rendered in Blender*
 
 </details>
 
