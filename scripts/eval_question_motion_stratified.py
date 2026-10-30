@@ -12,7 +12,6 @@ gesture equally well, contaminating R-Precision. Solution:
 
 Usage:
     CUDA_VISIBLE_DEVICES=0 python scripts/eval_question_motion_stratified.py \
-        --checkpoint model_files/pretrained_cpt/evaluator/question_motion_clip_best.ckpt \
         --data-root /path/to/Converse3D_eval
 """
 
@@ -233,7 +232,9 @@ def main():
         description="Stratified GT evaluation for QuestionMotionCLIP"
     )
     parser.add_argument(
-        "--checkpoint", type=str, required=True, help="Path to CLIP checkpoint"
+        "--checkpoint", type=str,
+        default=os.path.join(ROOT_DIR, "model_files/pretrained_cpt/evaluator/question_motion_clip_v3_best.ckpt"),
+        help="Path to the Q2M CLIP evaluator checkpoint"
     )
     parser.add_argument(
         "--data-root", type=str,
@@ -241,7 +242,7 @@ def main():
     )
     parser.add_argument(
         "--config", type=str,
-        default=os.path.join(ROOT_DIR, "configs/evaluator/question_motion_clip.yaml"),
+        default=os.path.join(ROOT_DIR, "configs/evaluator/question_motion_clip_v3_body.yaml"),
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--batch-size", type=int, default=64)

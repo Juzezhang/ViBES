@@ -29,6 +29,9 @@ gdown --folder https://drive.google.com/drive/folders/1GsoWZMcZYq-_IOYuKaWWu3bBZ
 gdown --folder https://drive.google.com/drive/folders/1EiN7n2anqbHaKXRj28bOZzIC955qrhhH -O ./ViBES-Body-Agent
 ```
 
+For the paper's TFHP talking-head metrics there is a separate face expert trained with a style
+prefix, `ViBES-Face-TFHP-Eval`. See [`4-evaluation.md`](4-evaluation.md#talking-head-on-tfhp-paper-table-4).
+
 The table below lists every file in the Google Drive folder, in the same layout as `model_files/pretrained_cpt/`:
 
 ### Face tokenizer (single version)

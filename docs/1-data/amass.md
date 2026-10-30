@@ -47,7 +47,7 @@ For example:
 python preprocess/dataset_process_amass.py \
     --smplx_path ./model_files/smplx_models \
     --dataset_path_original /path/to/AMASS_original_smplx \
-    --dataset_path_processed /path/to/AMASS \
+    --dataset_path_processed /path/to/AMASS_talking \
     --index_path ./preprocess/index.csv \
     --ex_fps 25
 ```
@@ -70,7 +70,9 @@ unzip preprocess/texts_label_index.zip -d /path/to/AMASS_talking/
 # Produces: /path/to/AMASS_talking/texts_label_index/{000002.txt, 000003.txt, ...}
 ```
 
-Then process the dataset to match the audio format:
+Then process the dataset to match the audio format. It converts the clips listed in `train.txt`,
+`val.txt` and `test.txt` (change with `--splits`). The [Converse3D evaluation set](converse3d_eval.md)
+uses clips from all three:
 
 ```bash
 python preprocess/convert_text_to_transcript_amass.py \
