@@ -5,7 +5,7 @@
 | Paper table | Benchmark | Script | Status |
 |---|---|---|---|
 | Table 2 | Conversational body motion on Converse3D (Q2M) | `scripts/eval_vibes_body_q2m.py` | Reproduced with the released `ViBES-Body-Agent` ([below](#evaluating-vibes-body-models-paper-table-2)); evaluation set from [`1-data/converse3d_eval.md`](1-data/converse3d_eval.md) |
-| Table 4 | Talking head on TFHP (LVE / MOD / FDD) | `evaluation/eval_face_style_control.py` | Reproduced exactly with the paper's style-control face expert ([below](#talking-head-on-tfhp-paper-table-4)) |
+| Table 4 | Talking head on TFHP (LVE / MOD / FDD) | `evaluation/eval_face_style_control.py` | Reproduced exactly with the released `ViBES-Face-TFHP-Eval` ([below](#talking-head-on-tfhp-paper-table-4)) |
 | Table 5 | Co-speech gestures on BEAT2 speaker 2 (FGD / BC / Diversity) | `evaluation/eval_beat2_cospeech.py` | Script provided; the speaker-2 model is not released yet ([below](#co-speech-gestures-on-beat2-paper-table-5)) |
 | Table 3 | Speech quality | — | Not covered |
 
@@ -309,11 +309,22 @@ python preprocess/preprocess_hf_tfhp_face_style.py \
 The large `--max_seq_length` is what the paper uses: each test session stays one sequence (120
 records). The default 2048 packs the sessions into 313 chunks and gives different numbers.
 
-**2. Evaluate:**
+**2. Get the evaluation checkpoint.** The paper's TFHP numbers come from a face expert trained for
+this protocol. On every turn it receives 50 reference face tokens of the test speaker as a style
+prefix, which is the setting of the ARTalk-style baselines. Use `ViBES-Face-TFHP-Eval` (motion
+expert only, ~0.86 GB, rebuilt on top of the GLM-4-Voice base like the other experts) for metrics.
+Use `ViBES-Face` for normal inference.
+
+```bash
+pip install gdown
+gdown --folder https://drive.google.com/drive/folders/1U5H0hAADrp9r73Er5G4AQrAFZXZBMuGL -O ./ViBES-Face-TFHP-Eval
+```
+
+**3. Evaluate:**
 
 ```bash
 python -m evaluation.eval_face_style_control \
-    --checkpoint ./ViBES-Face \
+    --checkpoint ./ViBES-Face-TFHP-Eval \
     --glm_base_path ./model_files/glm-4-voice-9b \
     --test_dataset <TFHP_ROOT>/processed_tfhp_tokenized_face_style_test/tokenized_dataset \
     --output_dir eval_results/face_tfhp
@@ -324,12 +335,12 @@ About 55 s per session on one L40S (~1.8 h for the test set). Results go to `eva
 | Checkpoint | LVE (mm) ↓ | MOD (mm) ↓ | FDD ↓ |
 |---|---|---|---|
 | Paper, Table 4 | 10.87 | 2.29 | 6.05 |
-| Style-control face expert used in the paper (rerun) | 10.87 | 2.29 | 6.05 |
-| Released `ViBES-Face` | 10.11 | 2.13 | 8.30 |
+| `ViBES-Face-TFHP-Eval` | 10.87 | 2.29 | 6.05 |
+| `ViBES-Face` (general model, no style prefix in training) | 10.11 | 2.13 | 8.30 |
 
-- **The rerun matches the paper exactly:** the JSON values are identical to the original run.
-- **The released `ViBES-Face` is a different checkpoint:** it was trained without the style
-  prefix, and the table shows it evaluated on the same test set.
+- **`ViBES-Face-TFHP-Eval` reproduces the paper exactly:** the JSON values are identical to the
+  original run.
+- **`ViBES-Face` row:** shown for reference, evaluated on the same test set.
 - **MOD:** the script prints this column as `MHD`, the root-mean-square vertex distance over the
   whole face.
 
