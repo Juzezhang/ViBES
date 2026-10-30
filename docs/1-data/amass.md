@@ -106,7 +106,7 @@ PYTHONPATH=./speech_related python preprocess/scripts/get_audio_code_glm.py \
     --output_dir <AMASS_TALKING_ROOT>/audios_q_token_glm
 ```
 
-Produces `<AMASS_TALKING_ROOT>/audios_q_token_glm/<idx>.npy` — one `(N,) int64` array of GLM-4-Voice discrete audio tokens per `.wav` file. Make sure you've already run `./scripts/download_glm4voice_modules.sh` from the README setup.
+Produces `<AMASS_TALKING_ROOT>/audios_q_token_glm/<idx>.npy` — one `(N,) int64` array of GLM-4-Voice discrete audio tokens per `.wav` file. The Step 6 folder also has `audios_q_token_glm.zip`, the tokens we trained with; unzip it instead to skip this step. Make sure you've already run `./scripts/download_glm4voice_modules.sh` from the README setup.
 
 ## Step 8 — Tokenize motion with the body VQ-VAE
 

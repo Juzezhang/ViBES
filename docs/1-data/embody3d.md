@@ -63,8 +63,12 @@ packer below expects this **tokenized** layout under `<EMBODY3D_ROOT>`:
 python preprocess/preprocess_embody3d_dataset_body.py \
     --data_root   <EMBODY3D_ROOT>/aiagent \
     --output_path <EMBODY3D_ROOT>/processed_embody3d_body_train \
-    --split train
+    --split train \
+    --split_file preprocess/embody3d_aiagent_split.txt
 ```
+
+`--split_file` selects the exact clips we trained on (988 train / 110 test). Without it, the
+packer takes a sorted 9:1 split of the clips it finds under `--data_root`.
 
 Produces assistant-only training sequences with 3 modalities (text / audio / motion).
 Per-group token layout: `text + 26 audio + 1 begin_of_motion + 39 motion`
@@ -82,7 +86,8 @@ one unified body-expert training set — see [`combine.md`](combine.md).
 ### License
 
 Embody3D is © Meta and governed by Meta's dataset license. This repository ships only the
-**preprocessing script**, not any Embody3D data.
+**preprocessing scripts** and the clip list (`preprocess/embody3d_aiagent_split.txt`), not any
+Embody3D data.
 
 Sources: [Meta Embody 3D](https://www.meta.com/emerging-tech/codec-avatars/embody-3d/) ·
 [facebookresearch/embody-3d](https://github.com/facebookresearch/embody-3d) ·

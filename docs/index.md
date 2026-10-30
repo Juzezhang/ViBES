@@ -15,6 +15,7 @@
 - [Embody3D](1-data/embody3d.md) — Meta's Embody3D conversational dataset as a body-expert source (download + HF packing)
 - [Converse3D evaluation set](1-data/converse3d_eval.md) — Q2M benchmark (paper Table 2): released question/segment splits + script that cuts the motion from your BEAT2 / AMASS
 - [Combine datasets](1-data/combine.md) — Pack each source to a HF dataset (`preprocess_hf_*`) then concatenate into one unified per-modality training set (`combine_dataset.py`)
+- [Body training sets](1-data/body_training_sets.md) — Rebuild the training sets of the released body checkpoints (Cospeech / Agent) and how close a rebuild gets
 
 ## Training
 
