@@ -32,7 +32,7 @@ The speech models come in two sizes that differ only in the frozen speech/text b
 - [x] Text-to-motion (HumanML3D) — ViBES motion expert on a frozen Qwen3-1.7B, [`qwen_mome/`](qwen_mome/README.md), weights at [`JuzeZhang/ViBES-T2M`](https://huggingface.co/JuzeZhang/ViBES-T2M)
 - [x] Training code for face expert
 - [x] Training code for body expert
-- [x] Evaluation code for the paper's benchmarks — [docs/4-evaluation.md](docs/4-evaluation.md): Q2M on Converse3D ([evaluation set](docs/1-data/converse3d_eval.md)), TFHP talking head (with `ViBES-Face-TFHP-Eval`), BEAT2 co-speech gestures
+- [x] Evaluation code for the paper's benchmarks — [docs/4-evaluation.md](docs/4-evaluation.md): Q2M on Converse3D ([evaluation set](docs/1-data/converse3d_eval.md)), TFHP talking head (with `ViBES-Face-TFHP-Eval`), BEAT2 co-speech gestures (with `ViBES-BEAT2-Speaker2-Eval`)
 - [x] Dataset release (facial part) — [`JuzeZhang/Converse3D`](https://huggingface.co/datasets/JuzeZhang/Converse3D) (tokenized face training set), [`JuzeZhang/YouTube_Talking`](https://huggingface.co/datasets/JuzeZhang/YouTube_Talking), [`JuzeZhang/WebTalk-Synthetic`](https://huggingface.co/datasets/JuzeZhang/WebTalk-Synthetic)
 - [x] Dataset release (body part) — the motion can't be redistributed, so we release our AMASS questions/answers/speech (Google Drive) and the Embody3D clip list, plus the recipe to rebuild the released checkpoints' training sets from your own BEAT2 / AMASS / Embody3D: [docs/1-data/body_training_sets.md](docs/1-data/body_training_sets.md)
 - [x] Dataset preprocessing — per-dataset guides and scripts in [docs/1-data/](docs/1-data/)
