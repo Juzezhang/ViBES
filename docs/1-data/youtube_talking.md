@@ -7,8 +7,8 @@ hands, active-speaker segments, and motion tokens.
 
 > ⚠️ **Research use only.** The source videos are copyrighted YouTube content and
 > are **not redistributed** — download them yourself (Step 1). The release **does
-> ship the expensive model-output annotations** (TalkNet, 4D-Humans / MHR body,
-> FLAME face, fitted SMPL-X, HaMeR hands) so you skip hundreds of GPU-hours; the
+> ship the expensive model-output annotations** (TalkNet, 4D-Humans body, MHR body
+> as SMPL-X, FLAME face, fitted SMPL-X, HaMeR hands) so you skip hundreds of GPU-hours; the
 > cheap steps (audio extraction, tokenization, HF packing) are reproduced with the
 > shipped scripts. No raw video, audio, or rendered frames are redistributed.
 
@@ -22,9 +22,7 @@ JuzeZhang/YouTube_Talking/
 ├── download_youtube_talking.py
 ├── talknet_pywork.tar    (TalkNet active-speaker results — pywork/ per video, ~12 GB)
 ├── 4d_humans_results.tar (4D-Humans body recovery)
-├── mhr_results.tar       (MHR body; upload pending)
 ├── smplxflame_25.tar     (fitted SMPL-X body+face @25fps)
-├── FLAME_coeffs_25.tar   (FLAME face coefficients @25fps; upload pending)
 ├── hamer_results.tar     (HaMeR hands)
 ├── {train,val,test}_processed.txt    (346 / 9 / 11 fully-processed clip ids)
 ├── {train,val,test}_unprocessed.txt
@@ -32,10 +30,33 @@ JuzeZhang/YouTube_Talking/
 └── LICENSE
 ```
 
+Two more annotation tars are on Google Drive for now (a Hugging Face copy will follow):
+
+```
+Google Drive: ViBES_release/YouTube_Talking/
+├── FLAME_coeffs_25.tar      (FLAME face coefficients @25 fps, 2,480 clips, 146 GB)
+└── smplx_mhr_official.tar   (MHR body converted to SMPL-X, 714 clips, 31 GB)
+```
+
+```bash
+pip install gdown
+gdown --folder https://drive.google.com/drive/folders/1HohvE8Jic1nMh-plLeIf9X3MvWbIarNJ -O <YT_ROOT>
+```
+
+- **`FLAME_coeffs_25/<id>.npz`:** `exp` (T×50), `shape` (T×100), `pose` (T×6) at 25 fps.
+  This is Step 4's output.
+- **`smplx_mhr_official/<id>_mhr_official.npz`:** MHR body converted to SMPL-X with MHR's
+  official conversion. Fields: `transl`, `global_orient`, `body_pose`, `left_hand_pose`,
+  `right_hand_pose`, `betas`, `expression` and `fitting_errors` (mean ≈ 1 cm), plus
+  `frame_ids`, `fps` and `video_total_frames`. Each `_meta.json` holds the same summary.
+- **SMPL-X frames:** `frame_ids` index the source video at its own frame rate `fps`. Most
+  videos are 24 fps, not 25. 38 videos were processed every 5th frame (`frame_step` in
+  `_meta.json`), and 20 cover less than 90% of their video, so compare `frame_ids`
+  with `video_total_frames`.
+- **Not shipped:** the raw per-frame MHR outputs (`mhr_results/`, ~800 GB).
+
 Extract each `*.tar` in place (`for f in *.tar; do tar -xf "$f"; done`). The
-shipped annotations let you skip Steps 2, 5 and 6 below. `FLAME_coeffs_25.tar` and
-`mhr_results.tar` are not on Hugging Face yet; until they are, run Step 4 yourself
-(Step 5's SMPL-X output, `smplxflame_25/`, is shipped). The skippable steps are
+shipped annotations let you skip Steps 2, 4, 5 and 6 below. The skippable steps are
 documented for completeness / if you want to regenerate from scratch. All
 preprocessing scripts live in this repository (`preprocess/`).
 
@@ -102,7 +123,8 @@ FLAME_coeffs_25/     (used by Steps 7-9)
 
 Run [4D-Humans](https://github.com/shubham-goel/4D-Humans) and MHR on each video
 for body recovery (`4d_humans_results/`, `mhr_results/`), then fit the body to
-SMPL-X at 25 fps → `smplxflame_25/`.
+SMPL-X at 25 fps → `smplxflame_25/`. The MHR results converted to SMPL-X are shipped
+as `smplx_mhr_official/` (see above).
 
 ## Step 6 — Hands: HaMeR
 
