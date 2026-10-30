@@ -35,7 +35,7 @@ Make sure you have registered at https://smpl-x.is.tue.mpg.de/ and agreed to the
 #### BEAT2: A co-speech gesture dataset. Available from the [BEAT website](https://huggingface.co/datasets/H-Liu1997/BEAT2). We only used the English portion.
 ####  TFHP: Available from the [website](https://github.com/DiffPoseTalk/DiffPoseTalk/blob/main/datasets/HDTF_TFHP/README.md).
 ####  Embody3d: a multimodal dataset of 500 individual hours of 3D motion data. Available from the [website](https://github.com/facebookresearch/embody-3d).
-#### YouTube: please download our youtube dataset here (coming soon)
+#### YouTube_Talking: our in-the-wild talking dataset, on Hugging Face at [`JuzeZhang/YouTube_Talking`](https://huggingface.co/datasets/JuzeZhang/YouTube_Talking). See [`docs/1-data/youtube_talking.md`](../docs/1-data/youtube_talking.md).
 
 ## Dataset Structure
 

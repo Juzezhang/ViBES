@@ -32,5 +32,3 @@
 ## Developer Reference
 
 - [README](../README.md) — Project overview, environment setup, quick start, and demos
-- [CLAUDE.md](../CLAUDE.md) — Claude Code development context
-- [AGENTS.md](../AGENTS.md) — Repository guidelines
