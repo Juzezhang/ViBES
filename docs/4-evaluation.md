@@ -4,7 +4,7 @@
 
 | Paper table | Benchmark | Script | Status |
 |---|---|---|---|
-| Table 2 | Conversational body motion on Converse3D (Q2M) | `scripts/eval_vibes_body_q2m.py` | Reproduced with the released `ViBES-Body-Agent` ([below](#evaluating-vibes-body-models-paper-table-2)) |
+| Table 2 | Conversational body motion on Converse3D (Q2M) | `scripts/eval_vibes_body_q2m.py` | Reproduced with the released `ViBES-Body-Agent` ([below](#evaluating-vibes-body-models-paper-table-2)); evaluation set from [`1-data/converse3d_eval.md`](1-data/converse3d_eval.md) |
 | Table 4 | Talking head on TFHP (LVE / MOD / FDD) | `evaluation/eval_face_style_control.py` | Reproduced exactly with the paper's style-control face expert ([below](#talking-head-on-tfhp-paper-table-4)) |
 | Table 5 | Co-speech gestures on BEAT2 speaker 2 (FGD / BC / Diversity) | `evaluation/eval_beat2_cospeech.py` | Script provided; the speaker-2 model is not released yet ([below](#co-speech-gestures-on-beat2-paper-table-5)) |
 | Table 3 | Speech quality | — | Not covered |
@@ -217,7 +217,8 @@ Metrics are printed and written to `<save_dir>/q2m_results.json`.
   are skipped; the script reports how many samples were scored.
 - **Evaluation set:** `<CONVERSE3D_EVAL_ROOT>` holds `test.jsonl` and `motion_segments/test/`
   (4921 questions: 3128 motion-descriptive from AMASS / HumanML3D, 1793 conversational from
-  BEAT2). It is not public yet.
+  BEAT2). Build it with [`1-data/converse3d_eval.md`](1-data/converse3d_eval.md): download our
+  split files, then cut the motion from your own BEAT2 and AMASS.
 
 ### Global VAE
 
@@ -247,7 +248,7 @@ python scripts/eval_vibes_body_q2m.py --redecode_from eval_results/body_agent \
 | `--num_shards` / `--shard_id` | 1 / 0 | Generate one shard and exit |
 | `--gpus` | `0` | Comma-separated GPU IDs (one generation process per GPU) |
 | `--results_json` | `<save_dir>/q2m_results.json` | Where to write the metrics |
-| `--data_root` | `<CONVERSE3D_EVAL_ROOT>` | Dataset root |
+| `--data_root` | `<CONVERSE3D_EVAL_ROOT>` | Evaluation set built with [`1-data/converse3d_eval.md`](1-data/converse3d_eval.md) |
 | `--seed` | 42 | Random seed |
 
 The Q2M text encoder is the frozen CLIP ViT-L/14@336px; the `clip` package downloads it (~0.9 GB)
