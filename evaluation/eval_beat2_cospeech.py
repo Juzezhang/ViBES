@@ -90,9 +90,10 @@ def load_model(checkpoint, glm_base_path, device):
 
 def load_motion_vocab(checkpoint):
     """Map relative motion-token ids to (part, code) from the checkpoint's added tokens."""
+    # The speaker-2 model uses the EMAGE-VQ vocabulary (256 codes per part), not the one in vibes/
     path = os.path.join(checkpoint, "added_tokens.json")
     if not os.path.exists(path):
-        path = os.path.join(ROOT_DIR, "vibes", "added_tokens.json")
+        raise FileNotFoundError(f"{path} not found; the checkpoint must ship its own motion vocabulary")
     vocab = {}
     for name, idx in json.load(open(path)).items():
         m = re.fullmatch(r"<\|(face|upper|lower|hand)_(\d+)\|>", name)

@@ -6,7 +6,7 @@
 |---|---|---|---|
 | Table 2 | Conversational body motion on Converse3D (Q2M) | `scripts/eval_vibes_body_q2m.py` | Reproduced with the released `ViBES-Body-Agent` ([below](#evaluating-vibes-body-models-paper-table-2)); evaluation set from [`1-data/converse3d_eval.md`](1-data/converse3d_eval.md) |
 | Table 4 | Talking head on TFHP (LVE / MOD / FDD) | `evaluation/eval_face_style_control.py` | Reproduced exactly with the released `ViBES-Face-TFHP-Eval` ([below](#talking-head-on-tfhp-paper-table-4)) |
-| Table 5 | Co-speech gestures on BEAT2 speaker 2 (FGD / BC / Diversity) | `evaluation/eval_beat2_cospeech.py` | Script provided; the speaker-2 model is not released yet ([below](#co-speech-gestures-on-beat2-paper-table-5)) |
+| Table 5 | Co-speech gestures on BEAT2 speaker 2 (FGD / BC / Diversity) | `evaluation/eval_beat2_cospeech.py` | Close to the paper with the released `ViBES-BEAT2-Speaker2-Eval`: FGD and BC within 0.1, Diversity lower; the paper's exact checkpoint was lost ([below](#co-speech-gestures-on-beat2-paper-table-5)) |
 | Table 3 | Speech quality | — | Not covered |
 
 ## Question-to-Motion (Q2M) CLIP Evaluator
@@ -357,18 +357,50 @@ audio. The tokens are decoded with EMAGE's speaker-2 VQ-VAEs and scored with EMA
 - **BC:** beat consistency between audio onsets and upper-body motion.
 - **Diversity:** L1 diversity of the generated joints.
 
+**1. Get the evaluation files.** Like the baselines in the table, this benchmark uses a model
+trained only on BEAT2 speaker 2, with EMAGE's speaker-2 VQ-VAEs (256 codes per part, 30 fps) as
+the motion tokenizer. It is not the released body expert.
+
+| File | Contents |
+|---|---|
+| `ViBES-BEAT2-Speaker2-Eval/` | The speaker-2 ViBES model: 40 layers, motion expert only (~0.83 GB), rebuilt on top of the GLM-4-Voice base like the other experts |
+| `vq_emage_speaker_2.ckpt` | EMAGE's released speaker-2 VQ-VAEs (face, upper, hands, lower, global) in one file, weights unchanged |
+| `beat2_speaker2_test/` | The 15 tokenized test conversations: text, GLM-4-Voice audio tokens and motion slots |
+
+```bash
+pip install gdown
+gdown --folder https://drive.google.com/drive/folders/1EHUJ2rIUvxlxRK8Sq36FKjV853hiHeBJ -O ./BEAT2-Speaker2-Eval
+```
+
+**2. Evaluate:**
+
 ```bash
 python -m evaluation.eval_beat2_cospeech \
-    --checkpoint /path/to/beat2_speaker2_checkpoint \
-    --vq_checkpoint /path/to/vq_emage_speaker_2.ckpt \
-    --test_dataset /path/to/beat2_speaker2_test/tokenized_dataset \
+    --checkpoint ./BEAT2-Speaker2-Eval/ViBES-BEAT2-Speaker2-Eval \
+    --glm_base_path ./model_files/glm-4-voice-9b \
+    --vq_checkpoint ./BEAT2-Speaker2-Eval/vq_emage_speaker_2.ckpt \
+    --test_dataset ./BEAT2-Speaker2-Eval/beat2_speaker2_test/tokenized_dataset \
     --beat2_root <BEAT2_ROOT> \
     --output_dir eval_results/beat2_cospeech
 ```
 
+About 7 min per conversation on one L40S (~1.7 h for the test set). Results go to
+`eval_results.json`.
+
+| Checkpoint | FGD ↓ | BC ↑ | Diversity ↑ |
+|---|---|---|---|
+| Paper, Table 5 | 5.257 | 8.103 | 13.028 |
+| `ViBES-BEAT2-Speaker2-Eval` (seed 42) | 5.331 | 8.209 | 11.309 |
+
+- **Not an exact reproduction:** the paper's numbers come from a 5-layer speaker-2 checkpoint
+  that was lost. The released 40-layer model is the closest surviving one: FGD is 0.07 higher and
+  BC 0.1 higher than in the paper, and Diversity is 1.7 lower. Some surviving 5-layer
+  checkpoints reach the paper's Diversity (13.3–13.8) but have lower BC (7.3 or less); none
+  matches all three.
 - **Inputs:** `<BEAT2_ROOT>` must hold `smplxflame_30/`, `wave16k/` and EMAGE's `weights/`
   (`AESKConv_240_100.bin`, `mean_vel_smplxflame_30.npy`).
-- **Not released yet:** the speaker-2 ViBES model, the VQ-VAEs and the tokenized test set.
+- **License:** the VQ-VAEs are EMAGE's ([Liu et al., CVPR 2024](https://github.com/PantoMatrix/PantoMatrix));
+  the test set is derived from BEAT2 and stays under BEAT2's terms.
 - **Score saved tokens:** `--from_dir <earlier output_dir>` scores the tokens a previous run
   saved, without generating again.
 - **Reading the table:** `paper_scale` in `eval_results.json` gives the numbers in the paper's
