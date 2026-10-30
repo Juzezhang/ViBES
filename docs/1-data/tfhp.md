@@ -108,12 +108,16 @@ python preprocess/preprocess_hf_tfhp_face_style.py \
     --output_path <TFHP_ROOT>/processed_tfhp_tokenized_face_style_train \
     --split train
 
-# Test set (style = fixed middle of GT; deterministic)
+# Test set (style = fixed middle of GT; deterministic), one sequence per test session
 python preprocess/preprocess_hf_tfhp_face_style.py \
     --data_root   <TFHP_ROOT> \
     --output_path <TFHP_ROOT>/processed_tfhp_tokenized_face_style_test \
-    --split test
+    --split test --max_seq_length 10000000
 ```
+
+The large `--max_seq_length` keeps each of the 120 test sessions in a single sequence, which is
+the setting behind the paper's TFHP numbers (see [`4-evaluation.md`](../4-evaluation.md)). With the
+default 2048 the sessions are packed into 313 chunks instead.
 
 Per-turn group: **25 audio + 1 begin_of_motion + 50 face tokens**. The HF dataset has 12 features — adds `style_pool` on top of the normal-variant fields.
 
@@ -170,8 +174,6 @@ Three released scripts:
 | `preprocess/preprocess_hf_tfhp_face_test.py` | ❌ no | 11 | **Step 6b** test split — one file = one sequence (no merging across files) |
 
 All three read the same `<TFHP_ROOT>` layout (`transcripts/`, `audios_token_glm/`, `TOKENS_AGENT_25/`, `train.txt`/`val.txt`/`test.txt`) — only the output structure differs.
-
-> An ablation variant `preprocess/mics/preprocess_hf_tfhp_face_style_no_interp.py` exists for the sequential-position-encoding baseline; it is not used in the paper.
 
 ### Sequence structure
 
@@ -236,7 +238,6 @@ Each record carries a `style_pool` field with **all face token IDs from the sess
 | `preprocess/scripts/get_audio_code_glm.py` | WAV → GLM-4-Voice audio tokens (Step 3) |
 | `preprocess/scripts/get_compositional_motion_code.py` | Unified VQ-VAE token extraction (Step 4); face-only via `MODALITIES.TFHP: [face]` |
 | `preprocess/preprocess_hf_tfhp_face_style.py` | HF dataset builder (Step 6a, style control, interpolated) |
-| `preprocess/mics/preprocess_hf_tfhp_face_style_no_interp.py` | HF dataset builder (ablation, style control, sequential position encoding) |
 | `preprocess/preprocess_hf_tfhp_face.py` | HF dataset builder (Step 6b, normal, train) |
 | `preprocess/preprocess_hf_tfhp_face_test.py` | HF dataset builder (Step 6b, normal, test) |
 | `training/train_vibes_face_style_control.py` | Training with dynamic style sampling (separate doc) |

@@ -3,7 +3,10 @@ configs
 configs/lm
 configs/mics
 experiments
-evaluation
+evaluation/*
+!evaluation/eval_face_style_control.py
+!evaluation/face_metrics.py
+!evaluation/eval_beat2_cospeech.py
 inference/mics
 inference/inference_a2m_body.py
 inference/inference_expertnum2_a2m_body_bk.py
@@ -76,7 +79,6 @@ docs/1-data/_*_audit.md
 ViBES-Face-Expert1/
 # Internal experiment/debug scripts & docs with hardcoded real paths (run locally, don't publish):
 docs/masked_interleaved_attention.md
-preprocess/dataset_process_embody3d_parts.py
 scripts/build_webtalk_face_smoke_dataset.py
 scripts/check_vibes_mask_and_positions.py
 scripts/compare_face_mask_vs_legacy.py

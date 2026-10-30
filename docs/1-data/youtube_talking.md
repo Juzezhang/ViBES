@@ -22,9 +22,9 @@ JuzeZhang/YouTube_Talking/
 ├── download_youtube_talking.py
 ├── talknet_pywork.tar    (TalkNet active-speaker results — pywork/ per video, ~12 GB)
 ├── 4d_humans_results.tar (4D-Humans body recovery)
-├── mhr_results.tar       (MHR body)
+├── mhr_results.tar       (MHR body; upload pending)
 ├── smplxflame_25.tar     (fitted SMPL-X body+face @25fps)
-├── FLAME_coeffs_25.tar   (FLAME face coefficients @25fps)
+├── FLAME_coeffs_25.tar   (FLAME face coefficients @25fps; upload pending)
 ├── hamer_results.tar     (HaMeR hands)
 ├── {train,val,test}_processed.txt    (346 / 9 / 11 fully-processed clip ids)
 ├── {train,val,test}_unprocessed.txt
@@ -33,7 +33,9 @@ JuzeZhang/YouTube_Talking/
 ```
 
 Extract each `*.tar` in place (`for f in *.tar; do tar -xf "$f"; done`). The
-shipped annotations let you skip Steps 2, 4, 5, 6 below — those steps are
+shipped annotations let you skip Steps 2, 5 and 6 below. `FLAME_coeffs_25.tar` and
+`mhr_results.tar` are not on Hugging Face yet; until they are, run Step 4 yourself
+(Step 5's SMPL-X output, `smplxflame_25/`, is shipped). The skippable steps are
 documented for completeness / if you want to regenerate from scratch. All
 preprocessing scripts live in this repository (`preprocess/`).
 
