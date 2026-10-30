@@ -27,6 +27,9 @@ parser.add_argument('--text_folder_audio', type=str, required=True,
                     help="[OUTPUT] Where to write per-clip transcript files ready for TTS (e.g. texts_for_transcripts).")
 parser.add_argument('--text_label_index_dir', type=str, required=True,
                     help="[INPUT] Folder of label-index files (the extracted contents of preprocess/texts_label_index.zip).")
+parser.add_argument('--splits', nargs='+', default=['train', 'val', 'test'],
+                    help="Splits to convert (<split>.txt under --root_folder). The Converse3D evaluation set "
+                         "uses clips from all three.")
 args = parser.parse_args()
 
 text_folder = args.text_folder  
@@ -44,31 +47,11 @@ text_dir_amass = text_folder
 motion_dir_amass = motion_folder
 # audio_dir_amass = pjoin(data_root_amass, 'audios_token')
 
-split_file = join(root_folder, 'train.txt')
 # Data id list
-id_list_train = []
-with cs.open(split_file, "r") as f:
-    for line in f.readlines():
-        id_list_train.append(line.strip())
-
-
-# split_file_val = join(root_folder, 'val.txt')
-# # Load test data IDs
-# id_list_val = []
-# with cs.open(split_file_val, "r") as f:
-#     for line in f.readlines():
-#         id_list_val.append(line.strip())
-
-
-# split_file_test = join(root_folder, 'test.txt')
-# # Load test data IDs
-# id_list_test = []
-# with cs.open(split_file_test, "r") as f:
-#     for line in f.readlines():
-#         id_list_test.append(line.strip())
-
-# id_list_amass = id_list_train + id_list_val + id_list_test
-id_list_amass = id_list_train
+id_list_amass = []
+for split in args.splits:
+    with cs.open(join(root_folder, f'{split}.txt'), "r") as f:
+        id_list_amass.extend(line.strip() for line in f.readlines() if line.strip())
 
 # Iterate through the files to load data
 enumerator = enumerate(track(id_list_amass, f"Loading AMASS"))

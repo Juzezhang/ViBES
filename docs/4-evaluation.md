@@ -1,5 +1,14 @@
 # Evaluation
 
+## Reproducing the Paper
+
+| Paper table | Benchmark | Script | Status |
+|---|---|---|---|
+| Table 2 | Conversational body motion on Converse3D (Q2M) | `scripts/eval_vibes_body_q2m.py` | Reproduced with the released `ViBES-Body-Agent` ([below](#evaluating-vibes-body-models-paper-table-2)); evaluation set from [`1-data/converse3d_eval.md`](1-data/converse3d_eval.md) |
+| Table 4 | Talking head on TFHP (LVE / MOD / FDD) | `evaluation/eval_face_style_control.py` | Reproduced exactly with the released `ViBES-Face-TFHP-Eval` ([below](#talking-head-on-tfhp-paper-table-4)) |
+| Table 5 | Co-speech gestures on BEAT2 speaker 2 (FGD / BC / Diversity) | `evaluation/eval_beat2_cospeech.py` | Script provided; the speaker-2 model is not released yet ([below](#co-speech-gestures-on-beat2-paper-table-5)) |
+| Table 3 | Speech quality | — | Not covered |
+
 ## Question-to-Motion (Q2M) CLIP Evaluator
 
 A CLIP-style contrastive model that learns a shared embedding space between text questions and SMPLX body motion sequences, used to compute motion generation evaluation metrics.
@@ -163,46 +172,87 @@ Evaluated on Converse3D test set (4921 samples: 3128 motion-descriptive + 1793 c
 
 ---
 
-## Evaluating ViBES Body Models
+## Evaluating ViBES Body Models (paper Table 2)
 
-### Single GPU
+The paper's "Ours" row is the agent body expert, released as `ViBES-Body-Agent`. The script asks
+each test question, decodes the generated body tokens to SMPL-X (root translation from the Global
+VAE) and scores them with the Q2M evaluator. Generation dominates the cost: about 37 s per question
+on one L40S, so the 4921 test questions take roughly 50 GPU-hours. Split them across GPUs.
 
-```bash
-CUDA_VISIBLE_DEVICES=0 python scripts/eval_vibes_body_q2m.py \
-    --vibes_checkpoint /path/to/checkpoint \
-    --save_dir eval_results/body_v6
-```
-
-### Multi-GPU (recommended)
+### Generate + evaluate on one machine
 
 ```bash
 python scripts/eval_vibes_body_q2m.py \
-    --vibes_checkpoint /path/to/checkpoint \
-    --save_dir eval_results/body_v6 \
-    --gpus 0,1,2,3
+    --vibes_checkpoint ./ViBES-Body-Agent \
+    --glm_base_path ./model_files/glm-4-voice-9b \
+    --data_root <CONVERSE3D_EVAL_ROOT> \
+    --save_dir eval_results/body_agent \
+    --gpus 0,1,2,3,4,5,6,7
 ```
 
-4 GPUs: ~1.75 hours instead of ~7 hours.
-
-### Evaluate from Cached Results
+### Sharded generation (e.g. one SLURM array task per shard)
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 python scripts/eval_vibes_body_q2m.py \
-    --eval_only --save_dir eval_results/body_v6
+# task k of N; finished samples are skipped, so a timed-out task can simply be resubmitted
+python scripts/eval_vibes_body_q2m.py \
+    --vibes_checkpoint ./ViBES-Body-Agent --glm_base_path ./model_files/glm-4-voice-9b \
+    --data_root <CONVERSE3D_EVAL_ROOT> --save_dir eval_results/body_agent \
+    --num_shards N --shard_id k
+
+# once every shard is done
+python scripts/eval_vibes_body_q2m.py --eval_only \
+    --data_root <CONVERSE3D_EVAL_ROOT> --save_dir eval_results/body_agent
+```
+
+Metrics are printed and written to `<save_dir>/q2m_results.json`.
+
+| | R1-Bal | R1-Motion | R1-Conv | R3-Bal | MM Dist | FID | Div |
+|---|---|---|---|---|---|---|---|
+| Paper, Table 2 | 0.467 | 0.308 | 0.745 | 0.671 | 3.178 | 93.9 | 10.73 |
+| Released `ViBES-Body-Agent`, regenerated | 0.462 | 0.308 | 0.730 | 0.669 | 3.180 | 94.7 | 10.35 |
+
+- **Sampling:** generation samples (temperature 0.1, top-p 0.1), so reruns move by about the
+  confidence interval (±0.004 on R1-Balanced, ±0.01 on R1-Conv).
+- **Skipped questions:** about 1.7% of questions (82 of 4921) produce no decodable motion and
+  are skipped; the script reports how many samples were scored.
+- **Evaluation set:** `<CONVERSE3D_EVAL_ROOT>` holds `test.jsonl` and `motion_segments/test/`
+  (4921 questions: 3128 motion-descriptive from AMASS / HumanML3D, 1793 conversational from
+  BEAT2). Build it with [`1-data/converse3d_eval.md`](1-data/converse3d_eval.md): download our
+  split files, then cut the motion from your own BEAT2 and AMASS.
+
+### Global VAE
+
+The root velocity the evaluator sees comes from the Global VAE (`--global_checkpoint`, default
+`model_files/pretrained_cpt/VAE_Global_from_Lower54/last.ckpt`). The paper used an earlier Global
+VAE. Decoding the same tokens with either version gives the same scores to three decimals. Each
+generated `.npz` also stores the body tokens, so the same generations can be decoded with another
+Global VAE without regenerating:
+
+```bash
+python scripts/eval_vibes_body_q2m.py --redecode_from eval_results/body_agent \
+    --global_checkpoint <other_global_vae.ckpt> \
+    --data_root <CONVERSE3D_EVAL_ROOT> --save_dir eval_results/body_agent_other_global
 ```
 
 ### Arguments
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--vibes_checkpoint` | - | ViBES body checkpoint path |
-| `--save_dir` | `eval_results/body_v6` | Directory for generated .npz files |
+| `--vibes_checkpoint` | `./ViBES-Body-Agent` | Body checkpoint: Expert-1-only (released) or full |
+| `--glm_base_path` | `THUDM/glm-4-voice-9b` | GLM-4-Voice base that rebuilds Expert-0 for Expert-1-only checkpoints |
+| `--global_checkpoint` | released Global VAE | Lower-body pose -> root velocity |
+| `--agent` | False | Use the agent system prompt (`create_prompt(agent=True)`); the paper numbers use the default prompt |
+| `--save_dir` | `eval_results/body_v6` | Directory for generated `.npz` files |
 | `--eval_only` | False | Skip generation, evaluate from cache |
-| `--gpus` | `0` | Comma-separated GPU IDs |
-| `--data_root` | `<CONVERSE3D_EVAL_ROOT>` | Dataset root |
+| `--redecode_from` | - | Re-decode the tokens saved in this directory into `--save_dir`, then evaluate |
+| `--num_shards` / `--shard_id` | 1 / 0 | Generate one shard and exit |
+| `--gpus` | `0` | Comma-separated GPU IDs (one generation process per GPU) |
+| `--results_json` | `<save_dir>/q2m_results.json` | Where to write the metrics |
+| `--data_root` | `<CONVERSE3D_EVAL_ROOT>` | Evaluation set built with [`1-data/converse3d_eval.md`](1-data/converse3d_eval.md) |
 | `--seed` | 42 | Random seed |
 
-Features: resume support, multi-GPU parallel generation, cached evaluation.
+The Q2M text encoder is the frozen CLIP ViT-L/14@336px; the `clip` package downloads it (~0.9 GB)
+on first use.
 
 ---
 
@@ -240,6 +290,94 @@ CUDA_VISIBLE_DEVICES=0 python training/train_text_motion_clip.py \
 
 ---
 
+## Talking Head on TFHP (paper Table 4)
+
+LVE / MOD / FDD on the 120 TFHP test sessions, computed on FLAME vertices with ARTalk's metric code
+(`evaluation/face_metrics.py`). The face expert gets the test audio and regenerates every face token
+with greedy decoding, so a run is deterministic.
+
+**1. Build the test set** (style-control variant, one sequence per test session; inputs as in
+[`1-data/tfhp.md`](1-data/tfhp.md)):
+
+```bash
+python preprocess/preprocess_hf_tfhp_face_style.py \
+    --data_root   <TFHP_ROOT> \
+    --output_path <TFHP_ROOT>/processed_tfhp_tokenized_face_style_test \
+    --split test --max_seq_length 10000000
+```
+
+The large `--max_seq_length` is what the paper uses: each test session stays one sequence (120
+records). The default 2048 packs the sessions into 313 chunks and gives different numbers.
+
+**2. Get the evaluation checkpoint.** The paper's TFHP numbers come from a face expert trained for
+this protocol. On every turn it receives 50 reference face tokens of the test speaker as a style
+prefix, which is the setting of the ARTalk-style baselines. Use `ViBES-Face-TFHP-Eval` (motion
+expert only, ~0.86 GB, rebuilt on top of the GLM-4-Voice base like the other experts) for metrics.
+Use `ViBES-Face` for normal inference.
+
+```bash
+pip install gdown
+gdown --folder https://drive.google.com/drive/folders/1U5H0hAADrp9r73Er5G4AQrAFZXZBMuGL -O ./ViBES-Face-TFHP-Eval
+```
+
+**3. Evaluate:**
+
+```bash
+python -m evaluation.eval_face_style_control \
+    --checkpoint ./ViBES-Face-TFHP-Eval \
+    --glm_base_path ./model_files/glm-4-voice-9b \
+    --test_dataset <TFHP_ROOT>/processed_tfhp_tokenized_face_style_test/tokenized_dataset \
+    --output_dir eval_results/face_tfhp
+```
+
+About 55 s per session on one L40S (~1.8 h for the test set). Results go to `eval_results.json`.
+
+| Checkpoint | LVE (mm) ↓ | MOD (mm) ↓ | FDD ↓ |
+|---|---|---|---|
+| Paper, Table 4 | 10.87 | 2.29 | 6.05 |
+| `ViBES-Face-TFHP-Eval` | 10.87 | 2.29 | 6.05 |
+| `ViBES-Face` (general model, no style prefix in training) | 10.11 | 2.13 | 8.30 |
+
+- **`ViBES-Face-TFHP-Eval` reproduces the paper exactly:** the JSON values are identical to the
+  original run.
+- **`ViBES-Face` row:** shown for reference, evaluated on the same test set.
+- **MOD:** the script prints this column as `MHD`, the root-mean-square vertex distance over the
+  whole face.
+
+---
+
+## Co-speech Gestures on BEAT2 (paper Table 5)
+
+The BEAT2 benchmark in the EMAGE setting: speaker 2 ("scott"), 15 test conversations, 30 fps.
+The model regenerates every face / body / hand token of a test conversation from its text and
+audio. The tokens are decoded with EMAGE's speaker-2 VQ-VAEs and scored with EMAGE's metrics
+(`multimodal_tokenizers/metrics/co_speech.py`):
+
+- **FGD:** Fréchet distance between AESKConv latents of the generated and GT 55-joint poses.
+- **BC:** beat consistency between audio onsets and upper-body motion.
+- **Diversity:** L1 diversity of the generated joints.
+
+```bash
+python -m evaluation.eval_beat2_cospeech \
+    --checkpoint /path/to/beat2_speaker2_checkpoint \
+    --vq_checkpoint /path/to/vq_emage_speaker_2.ckpt \
+    --test_dataset /path/to/beat2_speaker2_test/tokenized_dataset \
+    --beat2_root <BEAT2_ROOT> \
+    --output_dir eval_results/beat2_cospeech
+```
+
+- **Inputs:** `<BEAT2_ROOT>` must hold `smplxflame_30/`, `wave16k/` and EMAGE's `weights/`
+  (`AESKConv_240_100.bin`, `mean_vel_smplxflame_30.npy`).
+- **Not released yet:** the speaker-2 ViBES model, the VQ-VAEs and the tokenized test set.
+- **Score saved tokens:** `--from_dir <earlier output_dir>` scores the tokens a previous run
+  saved, without generating again.
+- **Reading the table:** `paper_scale` in `eval_results.json` gives the numbers in the paper's
+  form, where FGD is the raw value and BC is the raw value × 10.
+- **Run-to-run variation:** generation samples (temperature 0.2, top-p 0.8), so reruns differ by
+  about ±0.05 FGD and ±0.2 BC / Diversity.
+
+---
+
 ## File Reference
 
 | File | Purpose |
@@ -252,3 +390,7 @@ CUDA_VISIBLE_DEVICES=0 python training/train_text_motion_clip.py \
 | `scripts/eval_vibes_body_q2m.py` | ViBES body model evaluation |
 | `configs/evaluator/question_motion_clip_v3_body.yaml` | Evaluator config |
 | `training/train_text_motion_clip.py` | Training entry point |
+| `evaluation/eval_face_style_control.py` | TFHP talking-head evaluation (Table 4) |
+| `evaluation/face_metrics.py` | LVE / MHD (paper: MOD) / FDD on FLAME vertices |
+| `evaluation/eval_beat2_cospeech.py` | BEAT2 speaker-2 co-speech evaluation (Table 5) |
+| `multimodal_tokenizers/metrics/co_speech.py` | EMAGE FGD / BC / Diversity |

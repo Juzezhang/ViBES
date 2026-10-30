@@ -78,6 +78,10 @@ from scripts.eval_question_motion_stratified import (
 EVALUATOR_CHECKPOINT = os.path.join(ROOT_DIR, "model_files/pretrained_cpt/evaluator/question_motion_clip_v3_best.ckpt")
 EVALUATOR_CONFIG = os.path.join(ROOT_DIR, "configs/evaluator/question_motion_clip_v3_body.yaml")
 DATA_ROOT = "/path/to/Converse3D_eval"
+GLM_BASE_PATH = "THUDM/glm-4-voice-9b"
+VAE_CHECKPOINT_MAIN = os.path.join(ROOT_DIR, "model_files/pretrained_cpt/body/lom_vq.ckpt")
+VAE_CHECKPOINT_GLOBAL = os.path.join(ROOT_DIR, "model_files/pretrained_cpt/VAE_Global_from_Lower54/last.ckpt")
+TOKEN_OFFSET = 168736
 
 MAX_LENGTH = 196
 NUM_JOINTS_V3 = 22
@@ -162,32 +166,69 @@ class GeneratedMotionDataset(Dataset):
 # Generation
 # ============================================================================
 
-def generate_all_motions(vibes_checkpoint, save_dir, test_samples, device, num_gpus=1, gpu_id=0):
-    """Generate body motion for each test question using ViBES.
-
-    When num_gpus > 1, each GPU processes a disjoint shard of samples.
-    All GPUs write to the same save_dir (file-level locking via atomic writes).
-    """
+def _load_vibes_model(vibes_checkpoint, glm_base_path, device):
+    """Load ViBES from a full checkpoint or an Expert-1-only one (the released ViBES-Body-*)."""
     from transformers import AutoTokenizer, AutoConfig, AutoModel
     from transformers.modeling_utils import load_sharded_checkpoint
+    sys.path.insert(0, os.path.join(ROOT_DIR, "training"))
+    from expert_io import is_expert1_checkpoint, load_expert1_checkpoint
+
+    tokenizer_path = os.path.join(ROOT_DIR, "vibes")
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
+    config = AutoConfig.from_pretrained(tokenizer_path, trust_remote_code=True)
+    model = AutoModel.from_config(
+        config, trust_remote_code=True,
+        torch_dtype=torch.bfloat16 if device.type == "cuda" else torch.float32,
+        attn_implementation="flash_attention_2",
+    ).to(device)
+    if is_expert1_checkpoint(vibes_checkpoint):
+        print(f"  Expert-1-only checkpoint; reconstructing Expert-0 from {glm_base_path}")
+        load_expert1_checkpoint(model, vibes_checkpoint, glm_base_path)
+    else:
+        load_sharded_checkpoint(model, vibes_checkpoint)
+    model.eval()
+    return tokenizer, model
+
+
+def _load_body_vaes(global_checkpoint, device):
+    """Upper / lower / hand VQ-VAEs and the Global VAE (lower-body pose -> root velocity)."""
     from multimodal_tokenizers.archs.lom_vq import VQVAEConvZeroDSUS_PaperVersion, VAEConvZero
-    from utils.token_utils import extract_modality_tokens_from_response
-    from utils.tensor_utils import apply_body_token_offset, inverse_selection_tensor
-    from utils.inference_utils import prepare_modality_masks, create_prompt
-    from multimodal_tokenizers.data.mixed_dataset.data_tools import (
-        JOINT_MASK_UPPER, JOINT_MASK_LOWER, JOINT_MASK_HANDS,
-    )
-    from multimodal_tokenizers.utils.rotation_conversions import (
-        rotation_6d_to_axis_angle, rotation_6d_to_matrix,
-        matrix_to_axis_angle, matrix_to_rotation_6d,
-    )
 
-    TOKEN_OFFSET = 168736
-    VAE_CHECKPOINT_MAIN = os.path.join(ROOT_DIR, 'model_files/pretrained_cpt/body/lom_vq.ckpt')
-    VAE_CHECKPOINT_GLOBAL = os.path.join(
-        "/path/to", 'experiments', 'multimodal_tokenizer',
-        'VAE_Global_from_Lower54', 'checkpoints', 'last.ckpt')
+    main_ckpt = torch.load(VAE_CHECKPOINT_MAIN, map_location="cpu", weights_only=False)['state_dict']
 
+    vae_upper = VQVAEConvZeroDSUS_PaperVersion(vae_layer=3, code_num=256, codebook_size=256, vae_quantizer_lambda=1, vae_test_dim=78)
+    vae_upper.load_state_dict({k.replace('vae_upper.', ''): v for k, v in main_ckpt.items() if k.startswith('vae_upper.')}, strict=True)
+    vae_upper.eval().to(device)
+
+    vae_lower = VQVAEConvZeroDSUS_PaperVersion(vae_layer=3, code_num=256, codebook_size=256, vae_quantizer_lambda=1, vae_test_dim=54)
+    vae_lower.load_state_dict({k.replace('vae_lower.', ''): v for k, v in main_ckpt.items() if k.startswith('vae_lower.')}, strict=True)
+    vae_lower.eval().to(device)
+
+    vae_hand = VQVAEConvZeroDSUS_PaperVersion(vae_layer=3, code_num=256, codebook_size=256, vae_quantizer_lambda=1, vae_test_dim=180)
+    vae_hand.load_state_dict({k.replace('vae_hand.', ''): v for k, v in main_ckpt.items() if k.startswith('vae_hand.')}, strict=True)
+    vae_hand.eval().to(device)
+
+    vae_global = VAEConvZero(vae_layer=4, code_num=256, codebook_size=256, vae_quantizer_lambda=1, vae_test_dim=61)
+    global_ckpt = torch.load(global_checkpoint, map_location="cpu", weights_only=False)
+    global_sd = global_ckpt['state_dict'] if 'state_dict' in global_ckpt else global_ckpt
+    missing, unexpected = vae_global.load_state_dict(
+        {k.replace('vae_global.', ''): v for k, v in global_sd.items() if 'vae_global' in k}, strict=False)
+    # Older Global VAEs predate the zero-init dataset-conditioning layers, which then load as a no-op
+    assert not unexpected and all(k.startswith(('dataset_embedding', 'dataset_gamma')) for k in missing), \
+        f"Global VAE mismatch: missing={missing}, unexpected={unexpected}"
+    vae_global.eval().to(device)
+
+    return vae_upper, vae_lower, vae_hand, vae_global
+
+
+def generate_all_motions(vibes_checkpoint, save_dir, test_samples, device, num_gpus=1, gpu_id=0,
+                         glm_base_path=GLM_BASE_PATH, global_checkpoint=VAE_CHECKPOINT_GLOBAL,
+                         agent=False):
+    """Generate body motion for each test question using ViBES.
+
+    When num_gpus > 1, each GPU (or each --shard_id) processes a disjoint shard of samples.
+    All shards write to the same save_dir; finished samples are skipped, so runs can resume.
+    """
     os.makedirs(save_dir, exist_ok=True)
 
     # Shuffle deterministically then shard across GPUs
@@ -207,40 +248,11 @@ def generate_all_motions(vibes_checkpoint, save_dir, test_samples, device, num_g
     if existing == len(all_tasks):
         return
 
-    # Load tokenizer + ViBES model
     print("  Loading ViBES model...")
-    tokenizer_path = os.path.join(ROOT_DIR, "vibes")
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
-    config = AutoConfig.from_pretrained(tokenizer_path, trust_remote_code=True)
-    model = AutoModel.from_config(
-        config, trust_remote_code=True,
-        torch_dtype=torch.bfloat16 if device.type == "cuda" else torch.float32,
-        attn_implementation="flash_attention_2",
-    ).to(device)
-    load_sharded_checkpoint(model, vibes_checkpoint)
-    model.eval()
+    tokenizer, model = _load_vibes_model(vibes_checkpoint, glm_base_path, device)
 
-    # Load body VAEs
-    print("  Loading body VAEs...")
-    main_ckpt = torch.load(VAE_CHECKPOINT_MAIN, map_location="cpu", weights_only=False)['state_dict']
-
-    vae_upper = VQVAEConvZeroDSUS_PaperVersion(vae_layer=3, code_num=256, codebook_size=256, vae_quantizer_lambda=1, vae_test_dim=78)
-    vae_upper.load_state_dict({k.replace('vae_upper.', ''): v for k, v in main_ckpt.items() if k.startswith('vae_upper.')}, strict=True)
-    vae_upper.eval().to(device)
-
-    vae_lower = VQVAEConvZeroDSUS_PaperVersion(vae_layer=3, code_num=256, codebook_size=256, vae_quantizer_lambda=1, vae_test_dim=54)
-    vae_lower.load_state_dict({k.replace('vae_lower.', ''): v for k, v in main_ckpt.items() if k.startswith('vae_lower.')}, strict=True)
-    vae_lower.eval().to(device)
-
-    vae_hand = VQVAEConvZeroDSUS_PaperVersion(vae_layer=3, code_num=256, codebook_size=256, vae_quantizer_lambda=1, vae_test_dim=180)
-    vae_hand.load_state_dict({k.replace('vae_hand.', ''): v for k, v in main_ckpt.items() if k.startswith('vae_hand.')}, strict=True)
-    vae_hand.eval().to(device)
-
-    vae_global = VAEConvZero(vae_layer=4, code_num=256, codebook_size=256, vae_quantizer_lambda=1, vae_test_dim=61)
-    global_ckpt = torch.load(VAE_CHECKPOINT_GLOBAL, map_location="cpu", weights_only=False)
-    global_sd = global_ckpt['state_dict'] if 'state_dict' in global_ckpt else global_ckpt
-    vae_global.load_state_dict({k.replace('vae_global.', ''): v for k, v in global_sd.items() if 'vae_global' in k}, strict=True)
-    vae_global.eval().to(device)
+    print(f"  Loading body VAEs (Global VAE: {global_checkpoint})...")
+    vaes = _load_body_vaes(global_checkpoint, device)
 
     # Generate (check file existence per-iteration for multi-node support)
     failed = 0
@@ -251,10 +263,7 @@ def generate_all_motions(vibes_checkpoint, save_dir, test_samples, device, num_g
             skipped += 1
             continue
         try:
-            success = _generate_single(
-                seg_id, question, model, tokenizer, device,
-                vae_upper, vae_lower, vae_hand, vae_global, save_dir,
-            )
+            success = _generate_single(seg_id, question, model, tokenizer, device, vaes, save_dir, agent)
             if not success:
                 failed += 1
                 failed_ids.append(seg_id)
@@ -268,24 +277,13 @@ def generate_all_motions(vibes_checkpoint, save_dir, test_samples, device, num_g
         print(f"  Failed IDs: {failed_ids[:20]}{'...' if len(failed_ids) > 20 else ''}")
 
 
-def _generate_single(seg_id, question, model, tokenizer, device,
-                      vae_upper, vae_lower, vae_hand, vae_global, save_dir):
+def _generate_single(seg_id, question, model, tokenizer, device, vaes, save_dir, agent=False):
     """Generate and save a single sequence. Returns True on success, False on failure."""
     from utils.inference_utils import prepare_modality_masks, create_prompt
     from utils.token_utils import extract_modality_tokens_from_response
-    from utils.tensor_utils import apply_body_token_offset, inverse_selection_tensor
-    from multimodal_tokenizers.data.mixed_dataset.data_tools import (
-        JOINT_MASK_UPPER, JOINT_MASK_LOWER, JOINT_MASK_HANDS,
-    )
-    from multimodal_tokenizers.utils.rotation_conversions import (
-        rotation_6d_to_axis_angle, rotation_6d_to_matrix,
-        matrix_to_axis_angle, matrix_to_rotation_6d, axis_angle_to_6d,
-    )
+    from utils.tensor_utils import apply_body_token_offset
 
-    TOKEN_OFFSET = 168736
-    LOWER_DIM = 54
-
-    prompt = create_prompt(question)
+    prompt = create_prompt(question, agent=agent)
     inputs = tokenizer([prompt], return_tensors="pt").to(device)
     batch_size, seq_len = inputs.input_ids.shape
     modality_masks, position_encoding_indices = prepare_modality_masks(
@@ -318,10 +316,28 @@ def _generate_single(seg_id, question, model, tokenizer, device,
         print(f"  {seg_id}: empty tokens, skipping")
         return False
 
+    _decode_and_save(seg_id, upper_tokens, lower_tokens, hand_tokens, vaes, save_dir, device)
+    return True
+
+
+def _decode_and_save(seg_id, upper_tokens, lower_tokens, hand_tokens, vaes, save_dir, device):
+    """Decode body tokens to SMPL-X poses + Global-VAE translation and save them with the tokens."""
+    from utils.tensor_utils import inverse_selection_tensor
+    from multimodal_tokenizers.data.mixed_dataset.data_tools import (
+        JOINT_MASK_UPPER, JOINT_MASK_LOWER, JOINT_MASK_HANDS,
+    )
+    from multimodal_tokenizers.utils.rotation_conversions import (
+        rotation_6d_to_axis_angle, rotation_6d_to_matrix,
+        matrix_to_axis_angle, matrix_to_rotation_6d,
+    )
+
+    LOWER_DIM = 54
+    vae_upper, vae_lower, vae_hand, vae_global = vaes
+
     with torch.no_grad():
         rec_upper = vae_upper.decode(torch.tensor(upper_tokens, device=device).unsqueeze(0).int())
         rec_lower = vae_lower.decode(torch.tensor(lower_tokens, device=device).unsqueeze(0).int())
-        rec_hand = vae_hand.decode(torch.tensor(hand_tokens, device=device).unsqueeze(0).int()) if hand_tokens else None
+        rec_hand = vae_hand.decode(torch.tensor(hand_tokens, device=device).unsqueeze(0).int()) if len(hand_tokens) else None
 
     n = min(rec_upper.shape[1], rec_lower.shape[1])
     if rec_hand is not None:
@@ -337,6 +353,7 @@ def _generate_single(seg_id, question, model, tokenizer, device,
     pose_lower_aa = matrix_to_axis_angle(pose_lower_mat).reshape(n, 27)
     pose_lower_full = inverse_selection_tensor(pose_lower_aa, JOINT_MASK_LOWER, n)
 
+    # The evaluator only sees the 22 body joints, so the hands stay at rest here
     pose_hands = torch.zeros(n, 90, device=device)
     pose_hands_full = inverse_selection_tensor(pose_hands, JOINT_MASK_HANDS, n)
 
@@ -346,7 +363,8 @@ def _generate_single(seg_id, question, model, tokenizer, device,
     to_global = F.pad(to_global, (0, 7))
     to_global[:, :, 54:57] = 0.0
     to_global[:, :, :LOWER_DIM] = lower2global
-    rec_global = vae_global(to_global)
+    with torch.no_grad():
+        rec_global = vae_global(to_global)
 
     rec_trans_v = rec_global["rec_pose"][:, :, 54:57]
     global_orient_aa = rec_pose[:, :3]
@@ -360,17 +378,36 @@ def _generate_single(seg_id, question, model, tokenizer, device,
         poses=rec_pose.detach().cpu().numpy(),
         trans=rec_trans.detach().cpu().numpy(),
         mocap_frame_rate=MOTION_FPS,
+        upper_tokens=np.asarray(upper_tokens, dtype=np.int64),
+        lower_tokens=np.asarray(lower_tokens, dtype=np.int64),
+        hand_tokens=np.asarray(hand_tokens, dtype=np.int64),
     )
-    return True
 
 
-def _worker_generate(vibes_checkpoint, save_dir, test_samples, gpu_id, num_gpus, rank):
+def redecode_motions(src_dir, save_dir, global_checkpoint, device):
+    """Decode the tokens saved in src_dir again, e.g. with another Global VAE, into save_dir."""
+    files = sorted(f for f in os.listdir(src_dir) if f.endswith(".npz"))
+    vaes = _load_body_vaes(global_checkpoint, device)
+    os.makedirs(save_dir, exist_ok=True)
+    for f in tqdm(files, desc="Re-decoding"):
+        data = np.load(os.path.join(src_dir, f))
+        if "upper_tokens" not in data:
+            raise ValueError(f"{f} has no saved tokens; generate it with this script first")
+        _decode_and_save(f[:-len(".npz")], data["upper_tokens"], data["lower_tokens"],
+                         data["hand_tokens"], vaes, save_dir, device)
+    print(f"  Re-decoded {len(files)} samples into {save_dir}")
+
+
+def _worker_generate(vibes_checkpoint, save_dir, test_samples, gpu_id, num_gpus, rank,
+                     glm_base_path, global_checkpoint, agent):
     """Worker process for multi-GPU generation."""
     device = torch.device(f"cuda:{gpu_id}")
     print(f"  [Worker {rank}] GPU {gpu_id}, generating on {device}")
     generate_all_motions(vibes_checkpoint, save_dir, test_samples, device,
-                         num_gpus=num_gpus, gpu_id=rank)
+                         num_gpus=num_gpus, gpu_id=rank, glm_base_path=glm_base_path,
+                         global_checkpoint=global_checkpoint, agent=agent)
     print(f"  [Worker {rank}] Done.")
+
 
 
 # ============================================================================
@@ -379,12 +416,27 @@ def _worker_generate(vibes_checkpoint, save_dir, test_samples, gpu_id, num_gpus,
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate ViBES body model on Converse3D with Q2M evaluator v3")
-    parser.add_argument("--vibes_checkpoint", type=str,
-                        default="/path/to/experiments/glm4voice_conversational_mot_layernum_40_modalitynum_3_rotation_body_v6/checkpoint-76500")
+    parser.add_argument("--vibes_checkpoint", type=str, default="./ViBES-Body-Agent",
+                        help="Body checkpoint: the released ViBES-Body-Agent (Expert-1-only) or a full checkpoint")
+    parser.add_argument("--glm_base_path", type=str, default=GLM_BASE_PATH,
+                        help="GLM-4-Voice base used to rebuild Expert-0 for Expert-1-only checkpoints")
+    parser.add_argument("--global_checkpoint", type=str, default=VAE_CHECKPOINT_GLOBAL,
+                        help="Global VAE that recovers root translation from the lower-body pose")
+    parser.add_argument("--agent", action="store_true",
+                        help="Use the agent system prompt / assistant prefix (create_prompt(agent=True))")
     parser.add_argument("--save_dir", type=str, default="eval_results/body_v6",
                         help="Directory to save/load generated motions")
     parser.add_argument("--eval_only", action="store_true",
                         help="Skip generation, evaluate from cached results")
+    parser.add_argument("--redecode_from", type=str, default=None,
+                        help="Decode the tokens saved in this directory again (with --global_checkpoint) "
+                             "into --save_dir instead of generating, then evaluate")
+    parser.add_argument("--num_shards", type=int, default=1,
+                        help="Split generation into this many shards (e.g. one SLURM task each)")
+    parser.add_argument("--shard_id", type=int, default=0,
+                        help="Shard to generate when --num_shards > 1; exits without evaluating")
+    parser.add_argument("--results_json", type=str, default=None,
+                        help="Where to write the metrics (default: <save_dir>/q2m_results.json)")
     parser.add_argument("--data_root", type=str, default=DATA_ROOT)
     parser.add_argument("--evaluator_checkpoint", type=str, default=EVALUATOR_CHECKPOINT)
     parser.add_argument("--evaluator_config", type=str, default=EVALUATOR_CONFIG)
@@ -414,8 +466,22 @@ def main():
                 })
     print(f"  {len(test_samples)} test questions loaded")
 
+    gen_kwargs = dict(glm_base_path=args.glm_base_path,
+                      global_checkpoint=args.global_checkpoint, agent=args.agent)
+
     # Step 1: Generate motions
-    if not args.eval_only:
+    if args.redecode_from:
+        print(f"\n=== Re-decoding tokens from {args.redecode_from} ===")
+        redecode_motions(args.redecode_from, args.save_dir, args.global_checkpoint,
+                         torch.device(f"cuda:{gpu_ids[0]}"))
+    elif args.num_shards > 1 and not args.eval_only:
+        print(f"\n=== Generating shard {args.shard_id}/{args.num_shards} on GPU {gpu_ids[0]} ===")
+        generate_all_motions(args.vibes_checkpoint, args.save_dir, test_samples,
+                             torch.device(f"cuda:{gpu_ids[0]}"),
+                             num_gpus=args.num_shards, gpu_id=args.shard_id, **gen_kwargs)
+        print("  Shard done. Run with --eval_only once all shards have finished.")
+        return
+    elif not args.eval_only:
         if num_gpus > 1:
             print(f"\n=== Generating motions on {num_gpus} GPUs: {gpu_ids} ===")
             import multiprocessing as mp
@@ -425,7 +491,8 @@ def main():
                 p = mp.Process(
                     target=_worker_generate,
                     args=(args.vibes_checkpoint, args.save_dir, test_samples,
-                          gid, num_gpus, rank),
+                          gid, num_gpus, rank, args.glm_base_path,
+                          args.global_checkpoint, args.agent),
                 )
                 p.start()
                 processes.append(p)
@@ -436,7 +503,7 @@ def main():
             print(f"\n=== Generating motions on GPU {gpu_ids[0]} ===")
             device = torch.device(f"cuda:{gpu_ids[0]}")
             generate_all_motions(args.vibes_checkpoint, args.save_dir, test_samples, device,
-                                 num_gpus=1, gpu_id=0)
+                                 num_gpus=1, gpu_id=0, **gen_kwargs)
     else:
         print(f"\n=== Skipping generation (--eval_only), loading from {args.save_dir} ===")
 
@@ -542,7 +609,7 @@ def main():
     print("\n" + "=" * 80)
     print("  ViBES Body Model — Q2M Evaluator v3 Results")
     print("=" * 80)
-    print(f"  ViBES checkpoint: {os.path.basename(args.vibes_checkpoint)}")
+    print(f"  Generations: {args.save_dir}")
     print(f"  Samples: {len(valid_samples)} ({n_motion} motion, {n_conv} conv)")
 
     print(f"\n  {'Metric':<25} {'Balanced':>20} {'Motion-only':>20} {'Conv-only':>20}")
@@ -559,6 +626,22 @@ def main():
     print(f"  {'MM Dist':<25} {mm.mean():.4f}+/-{mm.std()*ci:.4f}")
     print(f"  {'FID':<25} {fid:.4f}")
     print(f"  {'Diversity':<25} {diversity:.4f}")
+
+    results = {
+        "save_dir": args.save_dir,
+        "num_samples": len(valid_samples), "num_motion": n_motion, "num_conv": n_conv,
+        "mm_dist": float(mm.mean()), "mm_dist_ci": float(mm.std() * ci),
+        "fid": float(fid), "diversity": float(diversity),
+    }
+    for name, vals in (("balanced", all_r), ("motion", all_r_motion), ("conv", all_r_conv)):
+        for k in [1, 2, 3]:
+            v = np.array(vals[f"top_{k}"])
+            results[f"r{k}_{name}"] = float(v.mean())
+            results[f"r{k}_{name}_ci"] = float(v.std() * ci)
+    results_json = args.results_json or os.path.join(args.save_dir, "q2m_results.json")
+    with open(results_json, "w") as f:
+        json.dump(results, f, indent=2)
+    print(f"  Saved metrics to {results_json}")
 
     print(f"\n  GT Baseline (v3):")
     print(f"    Motion R-Prec Top-1: 0.5464, Top-3: 0.8162")

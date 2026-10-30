@@ -32,9 +32,10 @@ The speech models come in two sizes that differ only in the frozen speech/text b
 - [x] Text-to-motion (HumanML3D) — ViBES motion expert on a frozen Qwen3-1.7B, [`qwen_mome/`](qwen_mome/README.md), weights at [`JuzeZhang/ViBES-T2M`](https://huggingface.co/JuzeZhang/ViBES-T2M)
 - [x] Training code for face expert
 - [x] Training code for body expert
-- [x] Dataset release (facial part)
+- [x] Evaluation code for the paper's benchmarks — [docs/4-evaluation.md](docs/4-evaluation.md): Q2M on Converse3D ([evaluation set](docs/1-data/converse3d_eval.md)), TFHP talking head (with `ViBES-Face-TFHP-Eval`), BEAT2 co-speech gestures
+- [x] Dataset release (facial part) — [`JuzeZhang/Converse3D`](https://huggingface.co/datasets/JuzeZhang/Converse3D) (tokenized face training set), [`JuzeZhang/YouTube_Talking`](https://huggingface.co/datasets/JuzeZhang/YouTube_Talking), [`JuzeZhang/WebTalk-Synthetic`](https://huggingface.co/datasets/JuzeZhang/WebTalk-Synthetic)
 - [ ] Dataset release (body part)
-- [ ] Dataset preprocessing
+- [x] Dataset preprocessing — per-dataset guides and scripts in [docs/1-data/](docs/1-data/)
 
 
 ## 🛠️ Environment Setup
@@ -150,7 +151,7 @@ Full guides live under [`docs/`](docs/index.md):
 | Dataset preprocessing | [docs/1-data/](docs/1-data/) |
 | Training (tokenizers + LLM expert) | [docs/2-training.md](docs/2-training.md) |
 | Inference & utilities | [docs/3-inference.md](docs/3-inference.md) |
-| Evaluation | [docs/4-evaluation.md](docs/4-evaluation.md) |
+| Evaluation (how to reproduce the paper's tables) | [docs/4-evaluation.md](docs/4-evaluation.md) |
 
 
 ## Acknowledgements
