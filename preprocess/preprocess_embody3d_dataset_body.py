@@ -1234,6 +1234,9 @@ def main():
                        help="Limit number of videos to process (for debugging)")
     parser.add_argument("--split", type=str, choices=["train", "test", "val"], default="train", 
                        help="Dataset split to process (train:test = 9:1 ratio). Files are sorted and split deterministically.")
+    parser.add_argument("--split_file", type=str, default=None,
+                       help="Optional '<split> <take>/<participant>' list (e.g. preprocess/embody3d_aiagent_split.txt); "
+                            "selects exactly these clips instead of the 9:1 split of whatever is on disk")
     
     args = parser.parse_args()
     
@@ -1266,7 +1269,17 @@ def main():
     test_files = wav_files[train_size:]
     
     # Filter files based on split argument
-    if args.split == "train":
+    if args.split_file:
+        # Layout: <take>/<participant>/audio_separated/<take>.wav
+        list_split = "train" if args.split == "train" else "test"
+        with open(args.split_file) as f:
+            wanted = {parts[1] for parts in (line.split() for line in f if not line.startswith("#"))
+                      if len(parts) == 2 and parts[0] == list_split}
+        wav_files = [p for p in wav_files if f"{p.stem}/{p.parent.parent.name}" in wanted]
+        logging.info(f"Using {len(wav_files)}/{len(wanted)} {list_split} clips from {args.split_file}")
+        if len(wav_files) < len(wanted):
+            logging.warning(f"{len(wanted) - len(wav_files)} listed clips were not found under {args.data_root}")
+    elif args.split == "train":
         wav_files = train_files
         logging.info(f"Found {total_files} total WAV files, using {len(wav_files)} for train split (9:1 ratio)")
     elif args.split == "test":

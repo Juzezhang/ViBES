@@ -128,6 +128,9 @@ only in the combined dataset they consume (built in [`1-data/combine.md`](1-data
 | **`text2motion`** | `<OUT>/processed_h3d_text2motion_train/tokenized_dataset` | HumanML3D (alone) |
 | **`full`** | `<OUT>/processed_body_full_train` | BEAT2 + AMASS + Embody3D (all body except YouTube) |
 
+The released `ViBES-Body-Cospeech` was trained on `cospeech` and `ViBES-Body-Agent` on `full`. To
+rebuild those two sets, see [`1-data/body_training_sets.md`](1-data/body_training_sets.md).
+
 Example 4-GPU launch (co-speech target):
 
 ```bash

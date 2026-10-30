@@ -31,6 +31,11 @@ This repo defines **one face training target** and **three body training targets
 | Body | **`text2motion`** | HumanML3D (alone) |
 | Body | **`full`** | BEAT2 + AMASS + Embody3D (all body sources **except** YouTube) |
 
+The released `ViBES-Body-Cospeech` and `ViBES-Body-Agent` checkpoints were trained on the
+`cospeech` and `full` targets (BEAT2 and AMASS packed with `--max_seq_length 4096`, Embody3D with
+2048). The exact commands are in
+[`body_training_sets.md`](body_training_sets.md).
+
 ---
 
 ## Step 1 — Pack each source into a HuggingFace dataset

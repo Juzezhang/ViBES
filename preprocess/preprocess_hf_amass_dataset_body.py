@@ -13,9 +13,9 @@ and assumes:
 - Answer transcripts under data_root/transcripts_answer (with audio tokens)
 - Question transcripts under data_root/transcripts_question (text only)
 - Question audio tokens under data_root/audios_q_token_glm
-- Upper body tokens under data_root/TOKENS_AGENT_25_Rotation/upper
-- Lower body tokens under data_root/TOKENS_AGENT_25_Rotation/lower
-- Hand tokens under data_root/TOKENS_AGENT_25_Rotation/hand_generated
+- Upper body tokens under data_root/TOKENS_AGENT_25/upper
+- Lower body tokens under data_root/TOKENS_AGENT_25/lower
+- Hand tokens under data_root/TOKENS_AGENT_25/hand (optional; AMASS usually has none)
 - Split information in data_root/{split}.txt
 
 Key features:
@@ -1266,12 +1266,12 @@ def main():
                        help="Directory containing question text files (relative to data_root)")
     parser.add_argument("--audio_question_dir", type=str, default="audios_q_token_glm", 
                        help="Directory containing audio token files for questions (relative to data_root)")                       
-    parser.add_argument("--upper_dir", type=str, default="TOKENS_AGENT_25_Rotation/upper", 
+    parser.add_argument("--upper_dir", type=str, default="TOKENS_AGENT_25/upper", 
                        help="Directory containing upper body token files (relative to data_root)")
-    parser.add_argument("--lower_dir", type=str, default="TOKENS_AGENT_25_Rotation/lower", 
+    parser.add_argument("--lower_dir", type=str, default="TOKENS_AGENT_25/lower", 
                        help="Directory containing lower body token files (relative to data_root)")
-    parser.add_argument("--hand_dir", type=str, default="TOKENS_AGENT_25_Rotation/hand_generated", 
-                       help="Directory containing hand token files (relative to data_root)")
+    parser.add_argument("--hand_dir", type=str, default="TOKENS_AGENT_25/hand", 
+                       help="Directory containing hand token files (relative to data_root); optional, missing hand files are zero-filled and unsupervised")
     # Processing parameters
     parser.add_argument("--audio_fps", type=float, default=12.5, 
                        help="Audio tokens per second")
@@ -1354,9 +1354,11 @@ def main():
     lower_dir = os.path.join(args.data_root, args.lower_dir)
     hand_dir = os.path.join(args.data_root, args.hand_dir)
     sequence_ids = []
-    if not os.path.isdir(transcripts_answer_dir) or not os.path.isdir(transcripts_question_dir) or not os.path.isdir(audio_question_dir) or not os.path.isdir(upper_dir) or not os.path.isdir(lower_dir) or not os.path.isdir(hand_dir):
-        logging.error("One or more required directories do not exist: transcripts_answer_dir, transcripts_question_dir, audio_question_dir, upper_dir, lower_dir, hand_dir")
+    if not os.path.isdir(transcripts_answer_dir) or not os.path.isdir(transcripts_question_dir) or not os.path.isdir(audio_question_dir) or not os.path.isdir(upper_dir) or not os.path.isdir(lower_dir):
+        logging.error("One or more required directories do not exist: transcripts_answer_dir, transcripts_question_dir, audio_question_dir, upper_dir, lower_dir")
         return
+    if not os.path.isdir(hand_dir):
+        logging.warning(f"No hand token directory at {hand_dir}; hand tokens are zero-filled and not supervised")
 
     for transcripts_answer_path in Path(transcripts_answer_dir).glob("*.txt"):
         sequence_id = transcripts_answer_path.stem
