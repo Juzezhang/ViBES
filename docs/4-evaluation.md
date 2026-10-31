@@ -337,10 +337,13 @@ About 55 s per session on one L40S (~1.8 h for the test set). Results go to `eva
 | Paper, Table 4 | 10.87 | 2.29 | 6.05 |
 | `ViBES-Face-TFHP-Eval` | 10.87 | 2.29 | 6.05 |
 | `ViBES-Face` (general model, no style prefix in training) | 10.11 | 2.13 | 8.30 |
+| `ViBES-Face-0.5B` (general model on the 0.5B backbone) | 10.15 | 2.14 | 7.51 |
 
 - **`ViBES-Face-TFHP-Eval` reproduces the paper exactly:** the JSON values are identical to the
   original run.
-- **`ViBES-Face` row:** shown for reference, evaluated on the same test set.
+- **`ViBES-Face` and `ViBES-Face-0.5B` rows:** shown for reference, evaluated on the same test set.
+  For the 0.5B model add `--vibes_config vibes_0.5b --glm_base_path <ViBES-Audio> --layer_num 24`
+  (~32 s per session).
 - **MOD:** the script prints this column as `MHD`, the root-mean-square vertex distance over the
   whole face.
 

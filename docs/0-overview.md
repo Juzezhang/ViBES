@@ -4,7 +4,7 @@ ViBES is a **speech-language-behavior (SLB)** model that generates synchronized 
 
 ## Architecture in One Paragraph
 
-A single transformer backbone with three modality-specific experts (text, audio, motion) shares cross-modal information through **SLB-Attention**. Continuous SMPL-X motion is quantized into discrete tokens by per-part VQ-VAE tokenizers (face / upper / lower / hand / full body), so motion can be predicted by the same autoregressive head that handles text and audio. For body motion we use the **GENMO 145D** root-relative representation for stable global translation under autoregressive generation.
+A single transformer backbone with three modality-specific experts (text, audio, motion) shares cross-modal information through **SLB-Attention**. Continuous SMPL-X motion is quantized into discrete tokens by per-part VQ-VAE tokenizers (face / upper / lower / hand / full body), so motion can be predicted by the same autoregressive head that handles text and audio. The released body experts use the upper / lower / hand tokenizers, and the root translation is recovered from the lower-body pose by a Global VAE. A version on the **GENMO** root-relative representation, for more stable global translation, is in progress.
 
 ## Pretrained Checkpoints
 
@@ -28,6 +28,9 @@ huggingface-cli download JuzeZhang/ViBES-Face --local-dir ./ViBES-Face
 gdown --folder https://drive.google.com/drive/folders/1GsoWZMcZYq-_IOYuKaWWu3bBZClV3E17 -O ./ViBES-Body-Cospeech
 gdown --folder https://drive.google.com/drive/folders/1EiN7n2anqbHaKXRj28bOZzIC955qrhhH -O ./ViBES-Body-Agent
 ```
+
+The 0.5B face expert, `ViBES-Face-0.5B`, runs on the [ViBES-Audio](https://huggingface.co/JuzeZhang/ViBES-Audio)
+backbone; see [`3-inference.md`](3-inference.md#05b-face-model).
 
 For the paper's TFHP talking-head metrics there is a separate face expert trained with a style
 prefix, `ViBES-Face-TFHP-Eval`. See [`4-evaluation.md`](4-evaluation.md#talking-head-on-tfhp-paper-table-4).
