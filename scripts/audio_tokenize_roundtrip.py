@@ -29,7 +29,10 @@ cosyvoice_dir = os.path.join(speech_related_dir, "cosyvoice")
 if os.path.exists(cosyvoice_dir) and cosyvoice_dir not in sys.path:
     sys.path.insert(0, cosyvoice_dir)
 
-matcha_dir = os.path.join(speech_related_dir, "Matcha-TTS")
+# Matcha-TTS is the cosyvoice/third_party submodule; speech_related/Matcha-TTS is an older local layout
+matcha_dir = os.path.join(speech_related_dir, "cosyvoice", "third_party", "Matcha-TTS")
+if not os.path.isdir(os.path.join(matcha_dir, "matcha")):
+    matcha_dir = os.path.join(speech_related_dir, "Matcha-TTS")
 if os.path.exists(matcha_dir) and matcha_dir not in sys.path:
     sys.path.insert(0, matcha_dir)
 

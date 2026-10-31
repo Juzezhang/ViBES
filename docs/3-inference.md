@@ -8,6 +8,8 @@ Generates facial animation + synchronized audio response from a text prompt:
 
 ```bash
 python inference/inference_face.py \
+    --checkpoint ./ViBES-Face \
+    --glm_base_path ./model_files/glm-4-voice-9b \
     --user_text "If you had a superpower for one day, what would you choose?"
 ```
 
@@ -23,10 +25,12 @@ python inference/inference_face.py \
 
 | Flag | Default | Description |
 |---|---|---|
-| `--user_text` | (required) | Text prompt to convert into a conversational response |
-| `--output_dir` | `results/face/` | Output directory for the generated video |
+| `--user_text` | a sample question | Text prompt to convert into a conversational response |
+| `--output_dir` | `./test_output` | Output directory for the generated video |
+| `--output_filename` | `response.mp4` | Name of the output video |
 | `--checkpoint` | `./ViBES-Face` | Path to the face-expert checkpoint directory |
 | `--glm_base_path` | `THUDM/glm-4-voice-9b` | GLM-4-Voice base used to reconstruct the frozen text/audio expert (see note) |
+| `--vibes_config` | `./vibes` (9B) | MoME config + tokenizer; `vibes_0.5b` for the 0.5B model |
 | `--device` | `cuda` | `cuda` or `cpu` |
 
 > **Loading the released checkpoint.** `ViBES-Face` (and the body checkpoint) store **only the trained
@@ -36,7 +40,26 @@ python inference/inference_face.py \
 > GLM-4-Voice base you downloaded during setup to avoid a duplicate ~18 GB download. Older full
 > checkpoints (no marker) still load normally.
 
-Output: `<output_dir>/<timestamp>/result.mp4` plus intermediate token / audio files.
+Output: `<output_dir>/<output_filename>` (FLAME render with the speech).
+
+### 0.5B face model
+
+`ViBES-Face-0.5B` is the face expert on [ViBES-Audio](https://huggingface.co/JuzeZhang/ViBES-Audio),
+our distilled 0.5B GLM-4-Voice, so the whole model is ~0.85B parameters instead of ~10B. On TFHP it
+matches the 9B `ViBES-Face` (LVE 10.15 vs 10.11, FDD 7.51 vs 8.30;
+[docs/4-evaluation.md](4-evaluation.md#talking-head-on-tfhp-paper-table-4)). The spoken answer also
+comes from the 0.5B backbone.
+
+```bash
+huggingface-cli download JuzeZhang/ViBES-Audio --local-dir ./model_files/ViBES-Audio
+gdown --folder https://drive.google.com/drive/folders/17yH0Olqi3C5y5GpXuyg5rOZKQN027qeL -O ./ViBES-Face-0.5B
+
+python inference/inference_face.py \
+    --checkpoint ./ViBES-Face-0.5B \
+    --vibes_config vibes_0.5b \
+    --glm_base_path ./model_files/ViBES-Audio \
+    --user_text "If you had a superpower for one day, what would you choose?"
+```
 
 ---
 

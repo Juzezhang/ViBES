@@ -112,7 +112,7 @@ def evaluate(args):
     print(f"Using device: {device}")
 
     # Load tokenizer
-    tokenizer_path = os.path.join(ROOT_DIR, "vibes")
+    tokenizer_path = args.vibes_config or os.path.join(ROOT_DIR, "vibes")
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
 
     # Load model
@@ -275,6 +275,9 @@ def main():
                         help="Face checkpoint: full, or Expert-1-only (marked with expert_checkpoint.json)")
     parser.add_argument("--glm_base_path", type=str, default="THUDM/glm-4-voice-9b",
                         help="GLM-4-Voice base used to rebuild Expert-0 for Expert-1-only checkpoints")
+    parser.add_argument("--vibes_config", type=str, default=None,
+                        help="MoME config+tokenizer dir (defaults to ./vibes, the 9B backbone). Set to vibes_0.5b "
+                             "(with --glm_base_path pointing at ViBES-Audio and --layer_num 24) for the 0.5B variant.")
     parser.add_argument("--test_dataset", type=str, required=True)
     parser.add_argument("--output_dir", type=str, default="./eval_results")
     parser.add_argument("--gpu", type=int, default=0)

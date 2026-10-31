@@ -75,7 +75,10 @@ if os.path.exists(CONVERSATIONAL_AGENT_DIR):
 
 # Add speech_related subdirectories to sys.path
 cosyvoice_path = os.path.join(ROOT_DIR, "speech_related", "cosyvoice")
-matcha_path = os.path.join(ROOT_DIR, "speech_related", "Matcha-TTS")
+# Matcha-TTS is the cosyvoice/third_party submodule; speech_related/Matcha-TTS is an older local layout
+matcha_path = os.path.join(ROOT_DIR, "speech_related", "cosyvoice", "third_party", "Matcha-TTS")
+if not os.path.isdir(os.path.join(matcha_path, "matcha")):
+    matcha_path = os.path.join(ROOT_DIR, "speech_related", "Matcha-TTS")
 if os.path.exists(cosyvoice_path):
     if cosyvoice_path in sys.path:
         sys.path.remove(cosyvoice_path)
