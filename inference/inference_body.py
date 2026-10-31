@@ -93,7 +93,6 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from tqdm import tqdm
-from einops import einsum as einsum_fn
 from transformers import (
     AutoTokenizer,
     AutoModel,
@@ -119,7 +118,6 @@ sys.path.insert(0, ROOT_DIR)
 from utils.genmo.geo_transform import apply_T_on_points, compute_T_ayfz2ay
 from utils.genmo.vis.renderer import Renderer, get_global_cameras_static, get_ground_params_from_points
 from utils.genmo.camera import create_camera_sensor
-from utils.genmo.smplx_utils import make_smplx
 from utils.token_utils import extract_modality_tokens_from_response
 from utils.tensor_utils import apply_body_token_offset
 from utils.model_loader import load_vae_models, load_smplx_model
@@ -188,8 +186,6 @@ SMPLX_MODEL_DIR = os.environ.get(
     'VIBES_SMPLX_MODEL_DIR',
     os.path.join(ROOT_DIR, 'model_files', 'smplx_models'),
 )
-# GVHMR asset path (smplx2smpl, J_regressor, smpl_faces)
-GVHMR_ASSET_DIR = os.path.join(ROOT_DIR, 'model_files', 'gvhmr')
 
 # Audio decoder paths
 AUDIO_DECODER_CONFIG = os.path.join(ROOT_DIR, "speech_related", "glm-4-voice-decoder", "config.yaml")
@@ -511,34 +507,21 @@ def generate_motion_from_text(
         )
 
     # ========================================================================
-    # Video Rendering (GENMO-style: SMPLX -> SMPL conversion + proper camera)
+    # Video Rendering (SMPLX mesh, hands included)
     # ========================================================================
 
-    # Load SMPL conversion assets
-    smplx2smpl = torch.load(
-        os.path.join(GVHMR_ASSET_DIR, "smplx2smpl_sparse.pt"), weights_only=True
-    ).to(device)
-    J_regressor = torch.load(
-        os.path.join(GVHMR_ASSET_DIR, "smpl_neutral_J_regressor.pt"), weights_only=True
-    ).to(device)
-    faces_smpl = make_smplx("smpl").faces
-
-    # Convert SMPLX vertices to SMPL vertices
+    render_faces = torch.from_numpy(smplx_2020.faces.astype(np.int64))
     verts_smplx = vertices_rec.vertices.detach()
-    verts_smpl = torch.stack([smplx2smpl @ v for v in verts_smplx])
+    joints_smplx = vertices_rec.joints.detach()
 
-    # Normalize: origin XZ, floor level, face +Z
-    def _normalize_vertices(v, J_reg):
-        v = v.clone()
-        offset = einsum_fn(J_reg, v[0], "j v, v i -> j i")[0]
-        offset[1] = v[:, :, 1].min()
-        v -= offset
-        joints_for_rot = einsum_fn(J_reg, v[[0]], "j v, l v i -> l j i")
-        T_rot = compute_T_ayfz2ay(joints_for_rot, inverse=True)
-        return apply_T_on_points(v, T_rot)
-
-    verts = _normalize_vertices(verts_smpl, J_regressor)
-    joints = einsum_fn(J_regressor, verts, "j v, l v i -> l j i")
+    # Normalize: pelvis of frame 0 at the origin, floor level, face +Z
+    offset = joints_smplx[0, 0].clone()
+    offset[1] = verts_smplx[:, :, 1].min()
+    verts = verts_smplx - offset
+    joints = joints_smplx - offset
+    T_rot = compute_T_ayfz2ay(joints[[0]], inverse=True)
+    verts = apply_T_on_points(verts, T_rot)
+    joints = apply_T_on_points(joints, T_rot)
 
     # Setup camera with 24mm lens
     _, _, K = create_camera_sensor(RENDER_WIDTH, RENDER_HEIGHT, 24)
@@ -546,7 +529,7 @@ def generate_motion_from_text(
         width=RENDER_WIDTH,
         height=RENDER_HEIGHT,
         device=device,
-        faces=faces_smpl,
+        faces=render_faces,
         K=K,
         bin_size=0,
     )
