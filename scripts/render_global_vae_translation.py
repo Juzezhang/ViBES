@@ -103,7 +103,9 @@ def _load_vae_global(model, ckpt_path):
     }
     if not state_dict_global:
         state_dict_global = state_dict
-    model.vae_global.load_state_dict(state_dict_global, strict=True)
+    # checkpoints from before dataset conditioning have no dataset_embedding (zero-init, a no-op)
+    missing, unexpected = model.vae_global.load_state_dict(state_dict_global, strict=False)
+    assert set(missing) <= {"dataset_embedding.weight"} and not unexpected, (missing, unexpected)
 
 
 def main():

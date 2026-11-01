@@ -31,7 +31,9 @@ from multimodal_tokenizers.utils.load_checkpoint import _extract_state_dict
 def _load_vae_global(model, ckpt_path):
     sd = _extract_state_dict(torch.load(ckpt_path, map_location="cpu", weights_only=False), ckpt_path)
     g = {k.replace("vae_global.", ""): v for k, v in sd.items() if k.startswith("vae_global.")}
-    model.vae_global.load_state_dict(g or sd, strict=True)
+    # checkpoints from before dataset conditioning have no dataset_embedding (zero-init, a no-op)
+    missing, unexpected = model.vae_global.load_state_dict(g or sd, strict=False)
+    assert set(missing) <= {"dataset_embedding.weight"} and not unexpected, (missing, unexpected)
 
 
 def main():

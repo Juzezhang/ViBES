@@ -46,7 +46,9 @@ def _load_vae_global(model, ckpt_path):
                  if k.startswith("vae_global.")}
     if not sd_global:
         sd_global = state_dict
-    model.vae_global.load_state_dict(sd_global, strict=True)
+    # checkpoints from before dataset conditioning have no dataset_embedding (zero-init, a no-op)
+    missing, unexpected = model.vae_global.load_state_dict(sd_global, strict=False)
+    assert set(missing) <= {"dataset_embedding.weight"} and not unexpected, (missing, unexpected)
 
 
 def _foot_refine_transl(model, endec, lower, rec_trans, rec_contacts_logits, betas10):

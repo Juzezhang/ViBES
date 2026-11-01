@@ -58,7 +58,9 @@ def _load_vae_global_sd(ckpt_path):
 
 def _recover_trans(model, vae_sd, lower, global_dim, tar_go6d, init_pos, device):
     """Load a version's vae_global weights and integrate its predicted velocity to translation."""
-    model.vae_global.load_state_dict(vae_sd, strict=True)
+    # checkpoints from before dataset conditioning have no dataset_embedding (zero-init, a no-op)
+    missing, unexpected = model.vae_global.load_state_dict(vae_sd, strict=False)
+    assert set(missing) <= {"dataset_embedding.weight"} and not unexpected, (missing, unexpected)
     to_global = lower[:, :, :global_dim].clone()
     if to_global.shape[2] > 54:
         to_global[:, :, 54:] = 0.0
