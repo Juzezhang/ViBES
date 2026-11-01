@@ -24,6 +24,9 @@ The speech models come in two sizes that differ only in the frozen speech/text b
 
 ### Released checkpoints
 
+<details>
+<summary><b>Show all checkpoints and download links</b></summary>
+
 Each checkpoint holds only the trained motion expert (Expert-1); the frozen backbone is rebuilt from its base model at load time.
 
 | Checkpoint | What it does | Backbone | Download |
@@ -38,6 +41,8 @@ Each checkpoint holds only the trained motion expert (Expert-1); the frozen back
 | Stage-1 checkpoints | motion VQ-VAE tokenizers, Global VAE (body root translation), Q2M evaluator (Table 2) | — | [Google Drive](https://drive.google.com/drive/folders/1pASh6gc6skACDzLKfO8VllAUsZffXCFv), goes to `model_files/pretrained_cpt/` |
 
 Inference: [docs/3-inference.md](docs/3-inference.md). Evaluation: [docs/4-evaluation.md](docs/4-evaluation.md).
+
+</details>
 
 
 ## ✅ TODO List
