@@ -180,11 +180,11 @@ def main():
 
         saved = 0
         for batch in loader:
-            motion = batch["motion_vector"].to(device)
+            motion = batch["motion_vector"][:1].to(device)
             lengths = batch.get("motion_len", None)
             trans = batch.get("trans")
             if trans is not None:
-                trans = trans.to(device)
+                trans = trans[:1].to(device)
 
             with torch.no_grad():
                 body_dim = cfg.model.params.modality_tokenizer.vae_body.params.vae_test_dim
