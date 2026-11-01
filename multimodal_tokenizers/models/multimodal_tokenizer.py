@@ -2060,6 +2060,12 @@ class MultimodalTokenizer(BaseModel):
                             tar_vertices=rs_set["tar_vertices"],
                             lengths=rs_set['length']
                         )
+                    elif metric == "FaceMetrics":
+                        getattr(self.metrics, metric).update(
+                            rec_vertices=rs_set["rec_vertices_face"],
+                            tar_vertices=rs_set["tar_vertices_face"],
+                            lengths=rs_set['length']
+                        )
                     elif metric == "GlobalMetrics":
                         getattr(self.metrics, metric).update(
                             rec_trans=rs_set["rec_trans"],
