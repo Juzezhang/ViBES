@@ -2,7 +2,7 @@
 Render videos from GENMO-formatted AMASS files.
 Randomly selects files and renders them using the GENMO rendering pipeline.
 
-Usage: python render_genmo_converted_amass.py
+Usage: python -m preprocess.render_genmo_converted_amass
 """
 
 import os
@@ -98,7 +98,7 @@ def render_amass_motion(smpl_params, out_path, width=1280, height=720, max_durat
     # Initialize body models
     Log.info("Initializing body models...")
     smplx = make_smplx("supermotion").cuda()
-    faces_smplxx = smplx.faces
+    faces_smplx = smplx.faces
     J_regressor = smplx.bm.J_regressor[:22]
     
     # Prepare SMPL-X parameters

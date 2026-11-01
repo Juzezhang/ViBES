@@ -331,7 +331,7 @@ def main():
 
     Log.info("Initializing GENMO renderer...")
     smplx_model = make_smplx("supermotion").cuda()
-    faces_smplxx = smplx_model.faces
+    faces_smplx = smplx_model.faces
     J_regressor = smplx_model.bm.J_regressor[:22]
 
     if render_cfg is not None:

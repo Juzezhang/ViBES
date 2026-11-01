@@ -359,7 +359,7 @@ def main():
     # Load SMPL-X rendering resources
     print("Initializing SMPL-X and renderer...")
     smplx_model = make_smplx("supermotion").cuda()
-    faces_smplxx = smplx_model.faces
+    faces_smplx = smplx_model.faces
     J_regressor = smplx_model.bm.J_regressor[:22]
     faces_t = torch.from_numpy(faces_smplx.astype(np.int64)).to(device)
 
