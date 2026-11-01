@@ -1101,7 +1101,7 @@ def main():
     # Define paths to data directories
     transcripts_root = os.path.join(args.data_root, "transcripts")
     audio_root = os.path.join(args.data_root, "audios_token_glm")
-    face_root = os.path.join(args.data_root, "TOKENS_AGENT_25")
+    face_root = os.path.join(args.data_root, "TOKENS_AGENT_25", "face")
     
     # Process each speaker and session
     interleaved_turns = []

@@ -82,7 +82,7 @@ python -m preprocess.scripts.get_compositional_motion_code \
 Produces:
 
 ```
-<TFHP_ROOT>/TOKENS_AGENT_25/{speaker}/{session}/{idx}.npy
+<TFHP_ROOT>/TOKENS_AGENT_25/face/{speaker}/{session}/{idx}.npy
 ```
 
 ## Step 5 — Copy the train / val / test split files
