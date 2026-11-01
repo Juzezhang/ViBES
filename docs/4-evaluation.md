@@ -5,7 +5,7 @@
 | Paper table | Benchmark | Script | Status |
 |---|---|---|---|
 | Table 2 | Conversational body motion on Converse3D (Q2M) | `scripts/eval_vibes_body_q2m.py` | Reproduced with the released `ViBES-Body-Agent` ([below](#evaluating-vibes-body-models-paper-table-2)); evaluation set from [`1-data/converse3d_eval.md`](1-data/converse3d_eval.md) |
-| Table 4 | Talking head on TFHP (LVE / MOD / FDD) | `evaluation/eval_face_style_control.py` | Reproduced exactly with the released `ViBES-Face-TFHP-Eval` ([below](#talking-head-on-tfhp-paper-table-4)) |
+| Table 4 | Talking head on TFHP (LVE / MOD / FDD) | `evaluation/eval_face_style_control.py` | Reproduced to the paper's precision with the released `ViBES-Face-TFHP-Eval` ([below](#talking-head-on-tfhp-paper-table-4)) |
 | Table 5 | Co-speech gestures on BEAT2 speaker 2 (FGD / BC / Diversity) | `evaluation/eval_beat2_cospeech.py` | Close to the paper with the released `ViBES-BEAT2-Speaker2-Eval`: FGD and BC within 0.1, Diversity lower; the paper's exact checkpoint was lost ([below](#co-speech-gestures-on-beat2-paper-table-5)) |
 | Table 3 | Speech quality | — | Not covered |
 
@@ -339,9 +339,11 @@ About 55 s per session on one L40S (~1.8 h for the test set). Results go to `eva
 | `ViBES-Face` (general model, no style prefix in training) | 10.11 | 2.13 | 8.30 |
 | `ViBES-Face-0.5B` (general model on the 0.5B backbone) | 10.15 | 2.14 | 7.51 |
 
-- **`ViBES-Face-TFHP-Eval` reproduces the paper exactly:** the JSON values are identical to the
-  original run.
-- **`ViBES-Face` and `ViBES-Face-0.5B` rows:** shown for reference, evaluated on the same test set.
+- **`ViBES-Face-TFHP-Eval` reproduces the paper:** a test set rebuilt with the released `face.ckpt`
+  gives LVE 10.871 / MOD 2.289 / FDD 6.047, which rounds to the paper's numbers. The test set of the
+  original run came from an older tokenization that differs in 0.7% of the input tokens; on that
+  set the JSON values are identical to the original run (10.870 / 2.288 / 6.052).
+- **`ViBES-Face` and `ViBES-Face-0.5B` rows:** shown for reference, evaluated on the original test set.
   For the 0.5B model add `--vibes_config vibes_0.5b --glm_base_path <ViBES-Audio> --layer_num 24`
   (~32 s per session).
 - **MOD:** the script prints this column as `MHD`, the root-mean-square vertex distance over the

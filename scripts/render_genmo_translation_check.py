@@ -17,7 +17,6 @@ from multimodal_tokenizers.utils.rotation_conversions import rotation_6d_to_matr
 
 # GENMO rendering stack (aligned with preprocess/render_genmo_converted_amass.py)
 ROOT_DIR = Path(__file__).resolve().parents[1]
-GVHMR_ASSET_DIR = ROOT_DIR / "model_files" / "gvhmr"
 
 from utils.genmo.pylogger import Log
 from utils.genmo.video_io_utils import save_video
@@ -64,7 +63,7 @@ def _normalize_vertices(verts_ay, J_regressor):
     return apply_T_on_points(v, T_rot)
 
 
-def _smplx_vertices(body_pose, global_orient, transl, betas, smplx_model, smplx2smpl):
+def _smplx_vertices(body_pose, global_orient, transl, betas, smplx_model):
     seq_len = body_pose.shape[0]
     betas_single = betas[0] if betas.ndim > 1 else betas
     smplx_params = {
@@ -74,12 +73,12 @@ def _smplx_vertices(body_pose, global_orient, transl, betas, smplx_model, smplx2
         "betas": betas_single.unsqueeze(0).expand(seq_len, -1).cuda(),
     }
     smpl_out = smplx_model(**smplx_params)
-    verts_ay = torch.stack([torch.matmul(smplx2smpl, v) for v in smpl_out.vertices])
+    verts_ay = smpl_out.vertices
     return verts_ay
 
 
 def render_pair(body_gt, global_gt, trans_gt, body_rec, global_rec, trans_rec,
-                betas, smplx_model, smplx2smpl, J_regressor, renderer,
+                betas, smplx_model, J_regressor, renderer,
                 max_seconds, fps, out_path):
     total_frames = body_gt.shape[0]
     max_frames = int(max_seconds * fps)
@@ -92,8 +91,8 @@ def render_pair(body_gt, global_gt, trans_gt, body_rec, global_rec, trans_rec,
     global_rec = global_rec[:seq_len]
     trans_rec = trans_rec[:seq_len]
 
-    verts_gt = _smplx_vertices(body_gt, global_gt, trans_gt, betas, smplx_model, smplx2smpl)
-    verts_rec = _smplx_vertices(body_rec, global_rec, trans_rec, betas, smplx_model, smplx2smpl)
+    verts_gt = _smplx_vertices(body_gt, global_gt, trans_gt, betas, smplx_model)
+    verts_rec = _smplx_vertices(body_rec, global_rec, trans_rec, betas, smplx_model)
 
     verts_gt = _normalize_vertices(verts_gt, J_regressor).detach()
     verts_rec = _normalize_vertices(verts_rec, J_regressor).detach()
@@ -163,10 +162,9 @@ def main():
     datamodule.setup("test")
 
     smplx_model = make_smplx("supermotion").cuda().eval()
-    smplx2smpl = torch.load(GVHMR_ASSET_DIR / "smplx2smpl_sparse.pt").cuda()
-    J_regressor = torch.load(GVHMR_ASSET_DIR / "smpl_neutral_J_regressor.pt").cuda()
+    J_regressor = smplx_model.bm.J_regressor[:22]
     _, _, K = create_camera_sensor(width, height, 24)
-    renderer = Renderer(width, height, device="cuda", faces=make_smplx("smpl").faces, K=K, bin_size=0)
+    renderer = Renderer(width, height, device="cuda", faces=smplx_model.faces, K=K, bin_size=0)
 
     out_root = Path("experiments") / "genmo_translation_check" / cfg.NAME / time.strftime("%Y-%m-%d-%H-%M-%S")
 
@@ -180,11 +178,11 @@ def main():
 
         saved = 0
         for batch in loader:
-            motion = batch["motion_vector"].to(device)
+            motion = batch["motion_vector"][:1].to(device)
             lengths = batch.get("motion_len", None)
             trans = batch.get("trans")
             if trans is not None:
-                trans = trans.to(device)
+                trans = trans[:1].to(device)
 
             with torch.no_grad():
                 body_dim = cfg.model.params.modality_tokenizer.vae_body.params.vae_test_dim
@@ -212,7 +210,7 @@ def main():
             trans_gt = trans_gt.reshape(1, n, 3)[0]
             trans_rec = trans_rec.reshape(1, n, 3)[0]
 
-            betas_gt = betas_gt.reshape(1, -1)
+            betas_gt = betas_gt.reshape(-1, 10)
 
             dataset_name = batch.get("dataset_name", ["genmo"])[0]
             sample_id = batch.get("id_name", ["sample"])[0]
@@ -228,7 +226,6 @@ def main():
                 trans_rec,
                 betas_gt[0],
                 smplx_model,
-                smplx2smpl,
                 J_regressor,
                 renderer,
                 max_seconds,

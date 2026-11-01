@@ -72,7 +72,7 @@ def main():
     parser.add_argument(
         "--config",
         type=str,
-        default=os.path.join(ROOT_DIR, "configs/evaluator/question_motion_clip.yaml"),
+        default=os.path.join(ROOT_DIR, "configs/evaluator/question_motion_clip_v3_body.yaml"),
         help="Config YAML path",
     )
     parser.add_argument("--seed", type=int, default=42)

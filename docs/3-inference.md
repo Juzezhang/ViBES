@@ -236,7 +236,7 @@ HumanML3D test results (R@1 0.486 / R@3 0.769 / FID 0.265 / MM-Dist 3.196) and t
 
 ## Render Mesh NPY Files
 
-Render pre-computed mesh `.npy` files (shape `(T, V, 3)`) to MP4 videos. Auto-detects SMPL (6890 verts) vs. SMPL-X (10475 verts).
+Render pre-computed mesh `.npy` files (shape `(T, V, 3)`) to MP4 videos. Auto-detects SMPL (6890 verts) vs. SMPL-X (10475 verts). SMPL-topology meshes, such as baseline outputs, also need `model_files/gvhmr/smpl_faces.npy`, the faces array `f` of the [SMPL](https://smpl.is.tue.mpg.de) model.
 
 ```bash
 # Basic usage — renders all *_mesh.npy in the directory

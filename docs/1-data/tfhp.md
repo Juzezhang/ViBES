@@ -70,11 +70,11 @@ This step needs a trained face VQ-VAE tokenizer checkpoint. You can either:
 - Use the pretrained face tokenizer downloaded as part of [`docs/0-overview.md`](../0-overview.md) (e.g., `model_files/pretrained_cpt/face/face.ckpt`), or
 - Train your own following [Stage 1 in `docs/2-training.md`](../2-training.md).
 
-Edit `configs/config_get_face_code_TFHP.yaml` (or your variant) so that `cfg.DATASET.TFHP.ROOT` points at `<TFHP_ROOT>`, then run:
+Set `DATASET.TFHP.ROOT` in `configs/assets.yaml` to `<TFHP_ROOT>`, and edit `configs/config_mixed_stage1_vq_compositional.yaml` (or your variant) so that `DATASET.datasets` lists only `TFHP`, then run:
 
 ```bash
 python -m preprocess.scripts.get_compositional_motion_code \
-    --cfg configs/<your-tfhp-face-code-config>.yaml
+    --cfg configs/config_mixed_stage1_vq_compositional.yaml
 ```
 
 `get_compositional_motion_code.py` is the single, config-driven tokenizer for every dataset; for TFHP set `cfg.DATASET.MODALITIES.TFHP: [face]` so only the face VQ-VAE runs.
@@ -82,7 +82,7 @@ python -m preprocess.scripts.get_compositional_motion_code \
 Produces:
 
 ```
-<TFHP_ROOT>/TOKENS_AGENT_25/{speaker}/{session}/{idx}.npy
+<TFHP_ROOT>/TOKENS_AGENT_25/face/{speaker}/{session}/{idx}.npy
 ```
 
 ## Step 5 — Copy the train / val / test split files

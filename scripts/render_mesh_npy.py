@@ -38,7 +38,13 @@ SMPLX_VERTS = 10475
 def load_faces(num_verts):
     """Load face topology matching the vertex count."""
     if num_verts == SMPL_VERTS:
-        faces = np.load(GVHMR_ASSET_DIR / "smpl_faces.npy")
+        faces_path = GVHMR_ASSET_DIR / "smpl_faces.npy"
+        if not faces_path.exists():
+            raise FileNotFoundError(
+                f"SMPL meshes need the SMPL faces at {faces_path}: save the array `f` of the "
+                "SMPL model there. SMPL-X meshes work without it."
+            )
+        faces = np.load(faces_path)
         print(f"Detected SMPL mesh ({num_verts} verts, {faces.shape[0]} faces)")
     elif num_verts == SMPLX_VERTS:
         import smplx

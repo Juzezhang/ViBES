@@ -35,7 +35,7 @@ TRAIN:
 
 # Evaluating Configuration
 EVAL:
-  BATCH_SIZE: 128 # Evaluating Batch size
+  BATCH_SIZE: 1 # Evaluating Batch size
   SPLIT: test
 
 TEST:
@@ -69,7 +69,9 @@ DATASET:
     - name: "TFHP"
 
 METRIC:
-  TYPE: ['RotationMetrics']
+  TYPE: ['FaceMetrics']
+  REGION_PATH: ./model_files/FLAME2020/FLAME_masks.pkl
+  TEMPLATE_PATH: ./model_files/FLAME2020/FLAME_NEUTRAL.pkl
 
 LOSS:
   LAMBDA_FEATURE: 1.0
@@ -94,7 +96,7 @@ model:
           vae_test_dim: ${Body_parts.${Selected_part}.vae_test_dim}  #dynamic
 
 LOGGER:
-  TYPE: ['wandb']
+  TYPE: []
   VAL_EVERY_STEPS: 10
   WANDB:
     params:

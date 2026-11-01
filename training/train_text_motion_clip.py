@@ -5,7 +5,7 @@ Follows the same pattern as training/train_tokenizer.py.
 
 Usage:
     python training/train_text_motion_clip.py \
-        --cfg configs/evaluator/text_motion_clip.yaml --nodebug
+        --cfg configs/evaluator/question_motion_clip_v3_body.yaml --nodebug
 """
 
 import os
