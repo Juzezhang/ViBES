@@ -571,8 +571,8 @@ class MultimodalTokenizer(BaseModel):
                 jaw_pose=jaw_pad,
                 shape=shape_pad,
             )
-            output_joints.append(flame_output.joints)
-            output_vertices.append(flame_output.vertices)
+            output_joints.append(flame_output.joints[:actual_length])
+            output_vertices.append(flame_output.vertices[:actual_length])
 
         output_joints = torch.cat(output_joints, dim=0)
         output_vertices = torch.cat(output_vertices, dim=0)
