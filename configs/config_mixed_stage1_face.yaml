@@ -69,7 +69,7 @@ DATASET:
     - name: "TFHP"
 
 METRIC:
-  TYPE: ['FaceMetrics']
+  TYPE: []
 
 LOSS:
   LAMBDA_FEATURE: 1.0
