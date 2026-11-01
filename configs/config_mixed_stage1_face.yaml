@@ -69,7 +69,9 @@ DATASET:
     - name: "TFHP"
 
 METRIC:
-  TYPE: []
+  TYPE: ['FaceMetrics']
+  REGION_PATH: ./model_files/FLAME2020/FLAME_masks.pkl
+  TEMPLATE_PATH: ./model_files/FLAME2020/FLAME_NEUTRAL.pkl
 
 LOSS:
   LAMBDA_FEATURE: 1.0

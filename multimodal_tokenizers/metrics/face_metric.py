@@ -18,7 +18,9 @@ class FaceMetrics(Metric):
         with open(self.region_path, 'rb') as f:
             masks = pickle.load(f, encoding='latin1')
         self.template_path = cfg.METRIC.TEMPLATE_PATH
-        self.template = torch.from_numpy(np.load(self.template_path)['mean_vertices']).float()
+        with open(self.template_path, 'rb') as f:
+            # FLAME template in mm, the unit update() passes vertices in
+            self.template = torch.from_numpy(np.array(pickle.load(f, encoding='latin1')['v_template'])).float() * 1000.0
 
         # Common key names might be 'lips'/'mouth', 'upper_face' or need to combine 'eyes','brows','forehead' etc.
         self.lip_idx = masks['lips']
@@ -208,7 +210,7 @@ class FaceMetrics(Metric):
         often referred to as "Protocol #1" in many papers.
         """
         # Calculate the motion of the predicted and ground truth vertices
-        mpvpe = torch.norm(vertices_pred - vertices_gt, p=2, dim=-1).mean(-1)
+        mpvpe = torch.norm(vertices_pred - vertices_gt, p=2, dim=-1).mean(-1).sum()
         return mpvpe
     
     @torch.no_grad()
@@ -220,7 +222,8 @@ class FaceMetrics(Metric):
             length = lengths[bs_idx]
             self.count += length
             self.LVE += self.compute_lve(1000*rec_vertices[bs_idx, :length], 1000*tar_vertices[bs_idx, :length], self.lip_idx)
-            self.FFD += self.compute_fdd(1000*rec_vertices[bs_idx, :length], 1000*tar_vertices[bs_idx, :length], self.upper_face_idx)
+            # compute_fdd is per sequence, compute() divides by frames
+            self.FFD += self.compute_fdd(1000*rec_vertices[bs_idx, :length], 1000*tar_vertices[bs_idx, :length], self.upper_face_idx) * length
             self.MPVPE_FACE += self.compute_mpvpe(1000*rec_vertices[bs_idx, :length], 1000*tar_vertices[bs_idx, :length]).mean()
             self.MOD += self.compute_mod(1000*rec_vertices[bs_idx, :length], 1000*tar_vertices[bs_idx, :length], self.lip_idx)
 
