@@ -13,6 +13,8 @@ ViBES is trained in **two stages**: (1) train per-part VQ-VAE tokenizers, then (
 
 VQ-VAE tokenizers convert continuous SMPL-X motion into discrete codes. Each part (face / upper / lower / hand / full body) is trained with its own config. All entry points live under `training/train_tokenizer.py`; pass `--nodebug` to actually log and checkpoint (the script defaults to `DEBUG=True` for safety during development).
 
+Set `FOLDER` and the dataset roots in `configs/assets.yaml` first, and remove any dataset you don't have from `DATASET.datasets` in the config. To log to Weights & Biases, set `LOGGER.TYPE: ['wandb']`.
+
 **Face tokenizer:**
 
 ```bash
