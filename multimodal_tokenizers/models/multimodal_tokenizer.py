@@ -1271,19 +1271,20 @@ class MultimodalTokenizer(BaseModel):
             rec_face = net_out_face["rec_pose"]
             n = tar_face.shape[1]
             n = min(tar_face.shape[1], rec_face.shape[1])
-            rec_pose_jaw = rotation_6d_to_axis_angle(rec_face[:, :n , :6].reshape(-1, 6)).reshape(-1, 3)
-            tar_pose_jaw = rotation_6d_to_axis_angle(tar_face[:, :n, :6].reshape(-1, 6)).reshape(-1, 3)
+            # face = 6D head + 6D jaw + 100 expression
+            rec_pose_jaw = rotation_6d_to_axis_angle(rec_face[:, :n, 6:12].reshape(-1, 6)).reshape(-1, 3)
+            tar_pose_jaw = rotation_6d_to_axis_angle(tar_face[:, :n, 6:12].reshape(-1, 6)).reshape(-1, 3)
 
             if self.cfg.TRAIN.LOSS_MESH== True:
                 # Run FLAME model
                 rec_joints, rec_vertices = self.forward_flame(
-                    exps=rec_face[:, :n, 6:].reshape(-1, 100),
+                    exps=rec_face[:, :n, 12:].reshape(-1, 100),
                     jaw=rec_pose_jaw,
                     shape=torch.zeros((bs*n, 100), device=rec_face.device),
                     batch_size=self.max_batch_size_smplx,
                 )
                 tar_joints, tar_vertices = self.forward_flame(
-                    exps=tar_face[:, :n, 6:].reshape(-1, 100),
+                    exps=tar_face[:, :n, 12:].reshape(-1, 100),
                     jaw=tar_pose_jaw,
                     shape=torch.zeros((bs*n, 100), device=rec_face.device),
                     batch_size=self.max_batch_size_smplx,
@@ -1737,10 +1738,11 @@ class MultimodalTokenizer(BaseModel):
             tar_face = tar_face[:,:n]
             
             # Extract the necessary parameters for visualization
-            rec_exps = rec_face[:, :, 6:]  # Use all 100 dimensions for FLAME
-            rec_jaw = rotation_6d_to_axis_angle(rec_face[:, :, :6].reshape(-1, 6)).reshape(-1, 3)
-            tar_exps = tar_face[:, :, 6:]  # Use all 100 dimensions for FLAME
-            tar_jaw = rotation_6d_to_axis_angle(tar_face[:, :, :6].reshape(-1, 6)).reshape(-1, 3)
+            # face = 6D head + 6D jaw + 100 expression
+            rec_exps = rec_face[:, :, 12:]  # Use all 100 dimensions for FLAME
+            rec_jaw = rotation_6d_to_axis_angle(rec_face[:, :, 6:12].reshape(-1, 6)).reshape(-1, 3)
+            tar_exps = tar_face[:, :, 12:]  # Use all 100 dimensions for FLAME
+            tar_jaw = rotation_6d_to_axis_angle(tar_face[:, :, 6:12].reshape(-1, 6)).reshape(-1, 3)
 
             # Generate meshes using FLAME
             rec_joints, rec_vertices_face = self.forward_flame(exps=rec_exps.reshape(-1, 100), jaw=rec_jaw, shape=torch.zeros((bs*n, 10), device=rec_jaw.device), batch_size=self.max_batch_size_smplx)

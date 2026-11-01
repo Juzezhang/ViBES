@@ -212,7 +212,7 @@ def main():
             trans_gt = trans_gt.reshape(1, n, 3)[0]
             trans_rec = trans_rec.reshape(1, n, 3)[0]
 
-            betas_gt = betas_gt.reshape(1, -1)
+            betas_gt = betas_gt.reshape(-1, 10)
 
             dataset_name = batch.get("dataset_name", ["genmo"])[0]
             sample_id = batch.get("id_name", ["sample"])[0]
