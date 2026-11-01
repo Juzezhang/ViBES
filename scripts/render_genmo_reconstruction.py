@@ -37,7 +37,6 @@ from pytorch3d.renderer import TexturesVertex, Materials
 from pytorch3d.utils import ico_sphere
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-GVHMR_ASSET_DIR = ROOT_DIR / "model_files" / "gvhmr"
 
 from utils.genmo.pylogger import Log
 from utils.genmo.video_io_utils import save_video
@@ -164,7 +163,7 @@ def _normalize_vertices(verts_ay, J_regressor):
     return apply_T_on_points(v, T_rot)
 
 
-def genmo_vertices_and_joints(motion_vector, smplx_model, smplx2smpl, J_regressor, max_seconds, fps):
+def genmo_vertices_and_joints(motion_vector, smplx_model, J_regressor, max_seconds, fps):
     """
     Convert GENMO motion_vector to world-space vertices/joints for rendering.
     Uses the same pipeline as preprocess/render_genmo_converted_amass.py.
@@ -189,13 +188,13 @@ def genmo_vertices_and_joints(motion_vector, smplx_model, smplx2smpl, J_regresso
     }
 
     smpl_out = smplx_model(**smplx_params)
-    verts_ay = torch.stack([torch.matmul(smplx2smpl, v) for v in smpl_out.vertices])
+    verts_ay = smpl_out.vertices
     verts_glob = _normalize_vertices(verts_ay, J_regressor)
     joints_glob = einsum(J_regressor, verts_glob, "j v, l v i -> l j i")
     return verts_glob, joints_glob, seq_len
 
 
-def smplx_vertices_and_joints_from_aa(pose_aa, transl, betas, smplx_model, smplx2smpl, J_regressor, max_seconds, fps):
+def smplx_vertices_and_joints_from_aa(pose_aa, transl, betas, smplx_model, J_regressor, max_seconds, fps):
     """
     Convert SMPL-X axis-angle pose + translation to world-space vertices/joints for rendering.
     Uses the same normalization as preprocess/render_genmo_converted_amass.py.
@@ -241,7 +240,7 @@ def smplx_vertices_and_joints_from_aa(pose_aa, transl, betas, smplx_model, smplx
         smplx_params["right_hand_pose"] = pose_aa[:, 120:165].cuda()
 
     smpl_out = smplx_model(**smplx_params)
-    verts_ay = torch.stack([torch.matmul(smplx2smpl, v) for v in smpl_out.vertices])
+    verts_ay = smpl_out.vertices
     verts_glob = _normalize_vertices(verts_ay, J_regressor)
     joints_glob = einsum(J_regressor, verts_glob, "j v, l v i -> l j i")
     return verts_glob, joints_glob, seq_len
@@ -332,9 +331,8 @@ def main():
 
     Log.info("Initializing GENMO renderer...")
     smplx_model = make_smplx("supermotion").cuda()
-    smplx2smpl = torch.load(GVHMR_ASSET_DIR / "smplx2smpl_sparse.pt").cuda()
-    faces_smpl = make_smplx("smpl").faces
-    J_regressor = torch.load(GVHMR_ASSET_DIR / "smpl_neutral_J_regressor.pt").cuda()
+    faces_smplxx = smplx_model.faces
+    J_regressor = smplx_model.bm.J_regressor[:22]
 
     if render_cfg is not None:
         width = int(getattr(render_cfg, "WIDTH", 1280))
@@ -343,7 +341,7 @@ def main():
         width = int(getattr(cfg.TEST, "RENDER_WIDTH", 1280)) if hasattr(cfg, "TEST") else 1280
         height = int(getattr(cfg.TEST, "RENDER_HEIGHT", 720)) if hasattr(cfg, "TEST") else 720
     _, _, K = create_camera_sensor(width, height, 24)
-    renderer = Renderer(width, height, device="cuda", faces=faces_smpl, K=K, bin_size=0)
+    renderer = Renderer(width, height, device="cuda", faces=faces_smplx, K=K, bin_size=0)
     color = torch.tensor([0.69, 0.39, 0.96]).cuda()
 
     # Contact visualization resources
@@ -351,7 +349,7 @@ def main():
     sphere_verts_template = sphere_mesh.verts_list()[0] * 0.05  # radius 0.05m
     sphere_faces = sphere_mesh.faces_list()[0]
     contact_color = torch.tensor([1.0, 1.0, 0.0]).to(device)  # yellow
-    faces_t = torch.from_numpy(faces_smpl.astype(np.int64)).to(device)
+    faces_t = torch.from_numpy(faces_smplx.astype(np.int64)).to(device)
 
     total_saved = 0
     for split in render_splits:
@@ -410,10 +408,10 @@ def main():
                 else:
                     rec_motion = rec_motion_raw
                 verts_gt, joints_gt, gt_len = genmo_vertices_and_joints(
-                    motion, smplx_model, smplx2smpl, J_regressor, max_seconds, fps
+                    motion, smplx_model, J_regressor, max_seconds, fps
                 )
                 verts_rec, joints_rec, rec_len = genmo_vertices_and_joints(
-                    rec_motion, smplx_model, smplx2smpl, J_regressor, max_seconds, fps
+                    rec_motion, smplx_model, J_regressor, max_seconds, fps
                 )
             elif is_genmo_lower:
                 motion = batch["motion_vector"][0].to(device)
@@ -435,10 +433,10 @@ def main():
                 rec_motion = merge_lower_upper_to_genmo(rec_lower_raw, rec_upper_raw, gt_global_r6d, include_global_orient=include_go)
 
                 verts_gt, joints_gt, gt_len = genmo_vertices_and_joints(
-                    motion, smplx_model, smplx2smpl, J_regressor, max_seconds, fps
+                    motion, smplx_model, J_regressor, max_seconds, fps
                 )
                 verts_rec, joints_rec, rec_len = genmo_vertices_and_joints(
-                    rec_motion, smplx_model, smplx2smpl, J_regressor, max_seconds, fps
+                    rec_motion, smplx_model, J_regressor, max_seconds, fps
                 )
             else:
                 is_lower_only = selected_part in {"lower_global", "lower", "lower_54"}
@@ -655,10 +653,10 @@ def main():
                 betas = tar_beta[0, :n]
 
                 verts_gt, joints_gt, gt_len = smplx_vertices_and_joints_from_aa(
-                    tar_pose_aa, tar_xyz, betas, smplx_model, smplx2smpl, J_regressor, max_seconds, fps
+                    tar_pose_aa, tar_xyz, betas, smplx_model, J_regressor, max_seconds, fps
                 )
                 verts_rec, joints_rec, rec_len = smplx_vertices_and_joints_from_aa(
-                    rec_pose_aa, rec_xyz, betas, smplx_model, smplx2smpl, J_regressor, max_seconds, fps
+                    rec_pose_aa, rec_xyz, betas, smplx_model, J_regressor, max_seconds, fps
                 )
 
             seq_len = min(gt_len, rec_len)

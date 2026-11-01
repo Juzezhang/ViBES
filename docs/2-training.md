@@ -37,8 +37,7 @@ python -m training.train_tokenizer \
     --nodebug
 ```
 
-Render GT pose + reconstructed translation for the global VAE (needs the SMPL assets listed under
-[Reconstruction Validation](#reconstruction-validation-reference)):
+Render GT pose + reconstructed translation for the global VAE:
 
 ```bash
 python -m scripts.render_global_vae_translation \
@@ -304,11 +303,7 @@ Optional flags: `--parts face,upper,lower,hand,body`, `--ckpt /path/to/ckpt` (si
 
 Render side-by-side GT vs. reconstructed motion to validate a trained tokenizer:
 
-> ⚠️ The render scripts in this section and `scripts.render_global_vae_translation` need SMPL assets
-> that aren't part of this release, under `model_files/gvhmr/`: `smplx2smpl_sparse.pt` and
-> `smpl_neutral_J_regressor.pt` from [GVHMR](https://github.com/zju3dv/GVHMR/tree/main/hmr4d/utils/body_model),
-> and `smpl_faces.npy`, the faces array `f` of the [SMPL](https://smpl.is.tue.mpg.de) model. The GENMO
-> scripts also need your trained tokenizer: point `TEST.CHECKPOINTS_BODY` at it.
+> ℹ️ The GENMO render scripts need your trained tokenizer: point `TEST.CHECKPOINTS_BODY` at it.
 
 ```bash
 python -m scripts.render_genmo_reconstruction \

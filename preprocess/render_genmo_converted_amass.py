@@ -15,7 +15,6 @@ from tqdm import tqdm
 from einops import einsum
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-GVHMR_ASSET_DIR = ROOT_DIR / "model_files" / "gvhmr"
 
 from utils.genmo.pylogger import Log
 from utils.genmo.video_io_utils import save_video
@@ -99,9 +98,8 @@ def render_amass_motion(smpl_params, out_path, width=1280, height=720, max_durat
     # Initialize body models
     Log.info("Initializing body models...")
     smplx = make_smplx("supermotion").cuda()
-    smplx2smpl = torch.load(GVHMR_ASSET_DIR / "smplx2smpl_sparse.pt").cuda()
-    faces_smpl = make_smplx("smpl").faces
-    J_regressor = torch.load(GVHMR_ASSET_DIR / "smpl_neutral_J_regressor.pt").cuda()
+    faces_smplxx = smplx.faces
+    J_regressor = smplx.bm.J_regressor[:22]
     
     # Prepare SMPL-X parameters
     # SMPL-X expects body_pose as (L, 21, 3) or (L, 63)
@@ -134,7 +132,7 @@ def render_amass_motion(smpl_params, out_path, width=1280, height=720, max_durat
     # Generate vertices from SMPL parameters
     Log.info("Generating vertices...")
     smpl_out = smplx(**smplx_params)
-    verts_ay = torch.stack([torch.matmul(smplx2smpl, v) for v in smpl_out.vertices])
+    verts_ay = smpl_out.vertices
     
     # Transform to world coordinates (Origin XZ, Floor level, Face +Z)
     def normalize_coordinates(v):
@@ -154,7 +152,7 @@ def render_amass_motion(smpl_params, out_path, width=1280, height=720, max_durat
     # Setup renderer (24mm lens)
     Log.info(f"Setting up renderer ({width}x{height})...")
     _, _, K = create_camera_sensor(width, height, 24)
-    renderer = Renderer(width, height, device="cuda", faces=faces_smpl, K=K, bin_size=0)
+    renderer = Renderer(width, height, device="cuda", faces=faces_smplx, K=K, bin_size=0)
     
     # Setup ground
     scale, cx, cz = get_ground_params_from_points(joints_glob[:, 0], verts_glob)

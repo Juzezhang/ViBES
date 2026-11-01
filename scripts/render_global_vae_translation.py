@@ -20,7 +20,6 @@ from multimodal_tokenizers.data.mixed_dataset.data_tools import JOINT_MASK_LOWER
 
 # GENMO rendering stack (aligned with preprocess/render_genmo_converted_amass.py)
 ROOT_DIR = Path(__file__).resolve().parents[1]
-GVHMR_ASSET_DIR = ROOT_DIR / "model_files" / "gvhmr"
 
 from utils.genmo.pylogger import Log
 from utils.genmo.video_io_utils import save_video
@@ -39,7 +38,7 @@ def _normalize_vertices(verts_ay, J_regressor):
     return apply_T_on_points(v, T_rot)
 
 
-def smplx_vertices_from_aa(pose_aa, transl, betas, smplx_model, smplx2smpl):
+def smplx_vertices_from_aa(pose_aa, transl, betas, smplx_model):
     seq_len = pose_aa.shape[0]
     betas_single = betas[0] if betas.ndim > 1 else betas
     smplx_params = {
@@ -49,11 +48,11 @@ def smplx_vertices_from_aa(pose_aa, transl, betas, smplx_model, smplx2smpl):
         "betas": betas_single.unsqueeze(0).expand(seq_len, -1).cuda(),
     }
     smpl_out = smplx_model(**smplx_params)
-    verts_ay = torch.stack([torch.matmul(smplx2smpl, v) for v in smpl_out.vertices])
+    verts_ay = smpl_out.vertices
     return verts_ay
 
 
-def render_pair(pose_aa, trans_gt, trans_rec, betas, smplx_model, smplx2smpl, J_regressor,
+def render_pair(pose_aa, trans_gt, trans_rec, betas, smplx_model, J_regressor,
                 renderer, max_seconds, fps, out_path):
     total_frames = pose_aa.shape[0]
     max_frames = int(max_seconds * fps)
@@ -63,8 +62,8 @@ def render_pair(pose_aa, trans_gt, trans_rec, betas, smplx_model, smplx2smpl, J_
     trans_gt = trans_gt[:seq_len]
     trans_rec = trans_rec[:seq_len]
 
-    verts_gt = smplx_vertices_from_aa(pose_aa, trans_gt, betas, smplx_model, smplx2smpl)
-    verts_rec = smplx_vertices_from_aa(pose_aa, trans_rec, betas, smplx_model, smplx2smpl)
+    verts_gt = smplx_vertices_from_aa(pose_aa, trans_gt, betas, smplx_model)
+    verts_rec = smplx_vertices_from_aa(pose_aa, trans_rec, betas, smplx_model)
 
     verts_gt = _normalize_vertices(verts_gt, J_regressor).detach()
     verts_rec = _normalize_vertices(verts_rec, J_regressor).detach()
@@ -147,10 +146,9 @@ def main():
     datamodule = build_data(cfg)
 
     smplx_model = make_smplx("supermotion").cuda().eval()
-    smplx2smpl = torch.load(GVHMR_ASSET_DIR / "smplx2smpl_sparse.pt").cuda()
-    J_regressor = torch.load(GVHMR_ASSET_DIR / "smpl_neutral_J_regressor.pt").cuda()
+    J_regressor = smplx_model.bm.J_regressor[:22]
     _, _, K = create_camera_sensor(width, height, 24)
-    renderer = Renderer(width, height, device="cuda", faces=make_smplx("smpl").faces, K=K, bin_size=0)
+    renderer = Renderer(width, height, device="cuda", faces=smplx_model.faces, K=K, bin_size=0)
 
     out_root = Path("experiments") / "global_vae_translation_check" / cfg.NAME / time.strftime("%Y-%m-%d-%H-%M-%S")
 
@@ -234,7 +232,6 @@ def main():
                 rec_trans[0],
                 betas,
                 smplx_model,
-                smplx2smpl,
                 J_regressor,
                 renderer,
                 max_seconds,

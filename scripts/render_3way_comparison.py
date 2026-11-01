@@ -32,7 +32,6 @@ from einops import einsum
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT_DIR = Path(ROOT)
-GVHMR_ASSET_DIR = ROOT_DIR / "model_files" / "gvhmr"
 
 from utils.genmo.vis.renderer import (
     Renderer,
@@ -254,7 +253,7 @@ def _normalize_vertices(verts_ay, J_regressor):
     return apply_T_on_points(v, T_rot)
 
 
-def genmo_to_verts(motion_vector, smplx_model, smplx2smpl, J_regressor, max_frames):
+def genmo_to_verts(motion_vector, smplx_model, J_regressor, max_frames):
     """Convert GENMO 145D to world-space SMPL vertices for rendering."""
     body_aa, global_aa, transl, betas = decode_genmo_to_smplx(motion_vector)
     T = min(body_aa.shape[0], max_frames)
@@ -271,7 +270,7 @@ def genmo_to_verts(motion_vector, smplx_model, smplx2smpl, J_regressor, max_fram
         "betas": betas_single.unsqueeze(0).expand(T, -1).cuda(),
     }
     smpl_out = smplx_model(**smplx_params)
-    verts_ay = torch.stack([torch.matmul(smplx2smpl, v) for v in smpl_out.vertices])
+    verts_ay = smpl_out.vertices
     verts_glob = _normalize_vertices(verts_ay, J_regressor)
     joints_glob = einsum(J_regressor, verts_glob, "j v, l v i -> l j i")
     return verts_glob, joints_glob, T
@@ -360,14 +359,13 @@ def main():
     # Load SMPL-X rendering resources
     print("Initializing SMPL-X and renderer...")
     smplx_model = make_smplx("supermotion").cuda()
-    smplx2smpl = torch.load(GVHMR_ASSET_DIR / "smplx2smpl_sparse.pt").cuda()
-    faces_smpl = make_smplx("smpl").faces
-    J_regressor = torch.load(GVHMR_ASSET_DIR / "smpl_neutral_J_regressor.pt").cuda()
-    faces_t = torch.from_numpy(faces_smpl.astype(np.int64)).to(device)
+    faces_smplxx = smplx_model.faces
+    J_regressor = smplx_model.bm.J_regressor[:22]
+    faces_t = torch.from_numpy(faces_smplx.astype(np.int64)).to(device)
 
     # Create one renderer per panel
     _, _, K = create_camera_sensor(args.width, args.height, 24)
-    renderer = Renderer(args.width, args.height, device="cuda", faces=faces_smpl, K=K, bin_size=0)
+    renderer = Renderer(args.width, args.height, device="cuda", faces=faces_smplx, K=K, bin_size=0)
 
     # Load test sequences based on dataset
     genmo_dir, token_root, seqs = get_dataset_paths(args.dataset)
@@ -415,7 +413,7 @@ def main():
         all_joints = []
         motion_list = [mv[:T_common], rec_lom[:T_common], rec_full[:T_common], rec_hyb[:T_common]]
         for motion in motion_list:
-            verts, joints, seq_len = genmo_to_verts(motion, smplx_model, smplx2smpl, J_regressor, T_common)
+            verts, joints, seq_len = genmo_to_verts(motion, smplx_model, J_regressor, T_common)
             all_verts.append(verts[:seq_len])
             all_joints.append(joints[:seq_len])
 
