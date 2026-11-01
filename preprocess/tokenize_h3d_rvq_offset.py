@@ -19,17 +19,17 @@ import os, sys, argparse
 import numpy as np
 import torch
 
-sys.path.insert(0, "/simurgh/u/juze/code/UniMoTok")
+sys.path.insert(0, "/path/to/UniMoTok")
 from multimodal_tokenizers.archs.motiongpt_vq import MotionGPTVQVae as VQVae
 
-H3D = "/simurgh/u/juze/datasets/HumanML3D"
-META = "/simurgh/u/juze/code/MotionGPT/deps/t2m/t2m/t2m/Comp_v6_KLD01/meta"
+H3D = "/path/to/HumanML3D"
+META = "/path/to/MotionGPT/deps/t2m/t2m/t2m/Comp_v6_KLD01/meta"
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ckpt", default="/simurgh2/users/juze/vqvae_hpsearch/runs_final/rvq8_dt1_full/vqvae_it300000.pt")
-    ap.add_argument("--out_dir", default="/simurgh2/users/juze/datasets/HumanML3D/TOKENS_RVQ8_DT1")
+    ap.add_argument("--ckpt", default="/path/to/rvq8_dt1_full/vqvae_it300000.pt")
+    ap.add_argument("--out_dir", default="/path/to/HumanML3D/TOKENS_RVQ8_DT1")
     ap.add_argument("--use_nq", type=int, default=0,
                     help="use only the first K RVQ layers (0 = all). The ckpt was trained with "
                          "quant_dropout=0.2 so prefix decoding is valid -> K=4 halves the sequence.")

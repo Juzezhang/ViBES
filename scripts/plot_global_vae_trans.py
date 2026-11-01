@@ -8,7 +8,7 @@ Env overrides (same as eval_global_vae_translation.py): VIBES_GLOBAL_CKPT, VIBES
 VIBES_AMASS_ROOT, VIBES_EVAL_MODALITIES. Extra: VIBES_PLOT_N (samples, default 6),
 VIBES_PLOT_OUT (output dir).
 
-  python -m scripts.plot_global_vae_trans --cfg configs/config_mixed_stage1_vae_global_wo_mesh_lr1e-4.yaml
+  python -m scripts.plot_global_vae_trans --cfg configs/config_global_vae_beat2amass.yaml
 """
 
 import os

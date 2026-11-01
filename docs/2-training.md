@@ -25,23 +25,13 @@ python -m training.train_tokenizer --cfg configs/config_mixed_stage1_face.yaml -
 python -m training.train_tokenizer --cfg configs/config_mixed_stage1_body_genmo.yaml --nodebug
 ```
 
-**Compositional Lower + Global (71D):**
-
-Includes translation + betas in the lower part.
-
-```bash
-python -m training.train_tokenizer \
-    --cfg configs/config_mixed_stage1_vq_compositional_lower_global.yaml \
-    --nodebug
-```
-
 **Global VAE from Lower_54:**
 
 Supervises only the global loss using local velocity.
 
 ```bash
 python -m training.train_tokenizer \
-    --cfg configs/config_mixed_stage1_vae_global_wo_mesh_lr1e-4.yaml \
+    --cfg configs/config_global_vae_beat2amass.yaml \
     --nodebug
 ```
 
@@ -49,7 +39,7 @@ Render GT pose + reconstructed translation for the global VAE:
 
 ```bash
 python -m scripts.render_global_vae_translation \
-    --cfg configs/config_mixed_stage1_vae_global_wo_mesh_lr1e-4.yaml
+    --cfg configs/config_global_vae_beat2amass.yaml
 ```
 
 </details>
@@ -297,7 +287,7 @@ python -m scripts.vq_codebook_stats \
 
 ```bash
 python -m scripts.vq_codebook_stats \
-    --cfg configs/config_mixed_stage1_vq_compositional_lower_global.yaml \
+    --cfg configs/config_mixed_stage1_vq_compositional.yaml \
     --mode tokens \
     --topk 0.1,0.05 \
     --out_dir experiments/codebook_stats
@@ -319,13 +309,6 @@ python -m scripts.render_genmo_reconstruction \
 > ℹ️ **Rendering the *released* full-body GENMO tokenizer.** `config_mixed_stage1_body_genmo.yaml` builds the 145D `VQVAEConvZeroDSUS_PaperVersion` arch (for training that variant from scratch). The **released** checkpoint `model_files/pretrained_cpt/VQVAE_0320_GenmoFull/last.ckpt` is instead the 135D `MotionGPTVQVaeAdapter` (`GENMO_FULL_INCLUDE_BETAS: false`); loading it into the 145D config raises a `state_dict` mismatch. To render/tokenize with the released checkpoint, use its **shipped config** `model_files/pretrained_cpt/VQVAE_0320_GenmoFull/genmo_full.yaml` (matching arch + dims; add a `TEST.RENDER` block for rendering). Also ensure PyTorch3D was built with GPU support (see README) and `ffmpeg-python` is installed.
 >
 > **135D vs 145D = the 10 SMPL-X `betas` (body shape).** 145D layout is `body_r6d(126) + betas(10) + global_orient_r6d(6) + local_transl_vel(3)`; 135D drops the `betas` block. The **released 135D tokenizer does not model shape** — on decode, betas are filled with zeros (`insert_zero_betas`), so reconstructions use the **neutral SMPL-X body** regardless of the subject's real shape. (The GENMO `.npz` *data* from preprocessing still stores real per-sequence betas at dims 126:136; the 135D tokenizer simply ignores them.)
-
-For the compositional lower_global variant:
-
-```bash
-python -m scripts.render_genmo_reconstruction \
-    --cfg configs/config_mixed_stage1_vq_compositional_lower_global.yaml
-```
 
 Outputs MP4s to `experiments/multimodal_tokenizer/VQVAE_Mixed_Genmo/genmo_recon_videos/`. The renderer uses the same GENMO/SMPL-X conversion as `preprocess/render_genmo_converted_amass.py`.
 

@@ -265,59 +265,6 @@ datasets/
 
 ---
 
-## 🚀 Training with Preprocessed Data
-
-After preprocessing, you can train VQ-VAE models using the preprocessed data. This is faster because it doesn't require the SMPLX model during training.
-
-### 4.1 Using Preprocessed Configs
-
-Example configs are provided for training with preprocessed data:
-
-```bash
-# Train with preprocessed Lower body format (71D)
-python -m multimodal_tokenizers.train --cfg configs/config_mixed_stage1_lower_preprocessed.yaml
-
-# Train with preprocessed Upper+Lower format (149D)
-python -m multimodal_tokenizers.train --cfg configs/config_mixed_stage1_upper_lower_preprocessed.yaml
-```
-
-### 4.2 Config Structure for Preprocessed Data
-
-Key config settings for preprocessed data:
-
-```yaml
-# Set Selected_part to use preprocessed format
-Selected_part: lower_preprocessed  # or upper_lower_preprocessed, genmo_preprocessed
-
-DATASET:
-  # Use preprocessed dataset names
-  datasets:
-    - name: "BEAT2_preprocessed"
-      preprocessed_dir: beat2_lower_25  # Relative to BEAT2.ROOT
-      subdirs:
-        - smplxflame_25
-        - smplxflame_25_mirror
-    - name: "AMASS_preprocessed"
-      preprocessed_dir: amass_lower_25  # Relative to AMASS.ROOT
-```
-
-### 4.3 Available Preprocessed Formats
-
-| Selected_part | Dimension | Description |
-|--------------|-----------|-------------|
-| `lower_preprocessed` | 71D | Lower body only |
-| `upper_lower_preprocessed` | 149D | Upper + Lower body |
-| `genmo_preprocessed` | 145D | Full body GENMO style |
-
-### 4.4 Benefits of Preprocessed Data
-
-1. **Faster training**: No SMPLX forward pass during data loading
-2. **Smaller memory footprint**: No SMPLX model loaded on GPU
-3. **Consistent preprocessing**: All data processed with same settings
-4. **Pre-computed foot contacts**: No runtime contact computation
-
----
-
 ## 🆘 Troubleshooting
 
 ### Common Issues

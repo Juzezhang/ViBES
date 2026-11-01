@@ -1,0 +1,141 @@
+NAME: VQVAE_Mixed_Genmo  # Experiment names
+ACCELERATOR: 'gpu' # Devices optioncal: "cpu", "gpu", "tpu", "ipu", "hpu", "mps, "auto"
+NUM_NODES: 1 # Number of GPU nodes for distributed training
+DEVICE: [0] # Index of gpus eg. [0] or [0,1,2,3]
+
+Selected_part: full_genmo  # defaut separate_rot
+Body_parts:
+  full_h3d:
+    ori: beat_smplx_joints
+    tar: beat_smplx_full
+    vae_test_dim: 263
+  full_rot:
+    ori: beat_smplx_joints
+    tar: beat_smplx_full
+    vae_test_dim: 330
+  full_genmo:
+    vae_test_dim: 145
+
+
+TRAIN:
+  #---------------------------------
+  STAGE: vqvae # stage "vae", "vq" , "lm_pretrain", "lm_instruct"  similar to motiongpt
+  #---------------------------------
+  NUM_WORKERS: 16 # Number of workers
+  BATCH_SIZE: 64 # Size of batches - reduced from 64
+  END_EPOCH: 999999 # End epoch
+  RESUME: '' # (was a local training-resume path; empty for fresh use)
+  PRETRAINED: '' # Preatrained model path
+  PRETRAINED_VQ: '' # Preatrained vq model path
+  PRECISION: 32
+  FORCE_BF16: false
+  LOSS_MESH: False  ## whether to use mesh loss for lower and upper body, from experments, looks like not working
+  LOSS_6D: False  ## EMAGE paper used rotation matrix as supervision, while here we tried with 6D representation
+  FK_JOINTS: true  ## use FK-only joints for joint pos/vel/acc losses (GENMO)
+  OPTIM:
+    target: Adam
+    params:
+      lr: 1e-4
+      weight_decay: 0.0
+
+# Evaluating Configuration
+EVAL:
+  BATCH_SIZE: 16 # Evaluating Batch size
+  SPLIT: test
+
+TEST:
+  # This config builds the 145D VQVAEConvZeroDSUS_PaperVersion arch. Its matching
+  # checkpoint is NOT in the public release — it was our local training output:
+  #   experiments/multimodal_tokenizer/VQVAE_Mixed_Genmo/checkpoints/last-v3.ckpt
+  # (point CHECKPOINTS_BODY there to reproduce our 145D results internally).
+  # The RELEASED full-body GENMO tokenizer is the 135D MotionGPTVQVaeAdapter at
+  #   model_files/pretrained_cpt/VQVAE_0320_GenmoFull/{last.ckpt,genmo_full.yaml}
+  # — use genmo_full.yaml (matching arch) to render/tokenize with it. Left empty
+  # here so a fresh run trains from scratch rather than loading a mismatched ckpt.
+  CHECKPOINTS_BODY: ''
+  SPLIT: test
+  BATCH_SIZE: 16 # training Batch size
+  RENDER:
+    SPLITS: [train, test]
+    NUM_SAMPLES_PER_SPLIT: 5
+    MAX_SECONDS: 10.0
+    WIDTH: 1280
+    HEIGHT: 720
+
+DATASET:
+  vary_length: False
+  pose_fps: 25
+  pose_length: 64
+  stride: 20
+  unit_length: 1
+  motion_representation: "genmo" # "rotation" or "h3d" or "genmo"
+  SMPLX_NUM_BETAS: 10
+  target: multimodal_tokenizers.data.MixedDataset.MixedDataModule
+  code_path: "TOKENS_GENMO_25"
+  BEAT2_Genmo:
+    pose_rep: beat2_genmo_25
+    pose_rep_subdirs:
+      - smplxflame_25
+      - smplxflame_25_mirror
+  AMASS_Genmo:
+    pose_rep: amass_genmo_25
+  MODALITIES:
+    BEAT2_Genmo: [full_genmo]
+    AMASS_Genmo: [full_genmo]
+  SAMPLING_RATIO:
+    BEAT2_Genmo: 1.0
+    AMASS_Genmo: 1.0
+  datasets:
+    - name: "AMASS_Genmo"
+    - name: "BEAT2_Genmo"
+
+
+METRIC:
+  TYPE: [BodyMetrics]
+
+LOSS:
+  LAMBDA_FEATURE: 1.0
+  LAMBDA_VELOCITY: 1.0
+  LAMBDA_COMMIT: 0.5
+  LAMBDA_CLS: 1.0
+  # GENMO-specific loss weights
+  LAMBDA_GEO_BODY: 1.0       # Geodesic loss on body pose (21 joints)
+  LAMBDA_GEO_GLOBAL: 0.2     # Geodesic loss on global orient (1 rotation, lower weight)
+  LAMBDA_BETAS: 0.1          # Shape parameters (usually stable, low weight)
+  LAMBDA_LOCAL_VEL: 10.0      # Local translation velocity (important for motion)
+  LAMBDA_LOCAL_POS: 1.0       # Local translation position (reconstructed from velocity)
+  LAMBDA_JOINT_POS: 1.0      # FK joint position loss (MSE)
+  LAMBDA_JOINT_VEL: 5.0      # FK joint velocity loss (MSE)
+  LAMBDA_JOINT_ACC: 5.0      # FK joint acceleration loss (MSE)
+  JOINT_UNIT_SCALE: 1.0  # scale joints to mm if SMPL-X is in meters
+  ABLATION:
+    RECONS_LOSS: 'l1_smooth'
+
+model:
+  target: multimodal_tokenizers.models.multimodal_tokenizer.MultimodalTokenizer
+  params:
+    modality_tokenizer:
+      vae_body:
+        target: multimodal_tokenizers.archs.lom_vq.VQVAEConvZeroDSUS_PaperVersion
+        params:
+          vae_layer: 3
+          code_num: 256
+          codebook_size: 256
+          vae_quantizer_lambda: 1
+          vae_test_dim: ${Body_parts.${Selected_part}.vae_test_dim} #dynamic
+
+
+
+LOGGER:
+  TYPE: []
+  VAL_EVERY_STEPS: 40
+  WANDB:
+    params:
+      project: ViBES
+
+TOKENIZE:
+  VISUALIZE: false
+  VIS_START: 0
+  VIS_END: 0
+  VIS_LEN: 500
+  VIS_BATCH: 50

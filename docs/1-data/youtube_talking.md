@@ -88,7 +88,7 @@ that have been removed/privated since collection are skipped and listed in
 ## Step 2 — Active-speaker detection (TalkNet)
 
 The shipped `talknet_output/<id>/pywork/` lets you **skip this step**. To
-regenerate it instead, run [TalkNet-ASD](https://github.com/TaoRuijie-TalkNet-ASD)
+regenerate it instead, run [TalkNet-ASD](https://github.com/TaoRuijie/TalkNet-ASD)
 on each video; only the `pywork/` outputs (`scores.pckl`, `tracks.pckl`) are
 needed downstream.
 

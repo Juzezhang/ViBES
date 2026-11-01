@@ -19,7 +19,7 @@ Runtime overrides via env vars (keeps internal/scrubbed paths out of the repo):
   VIBES_EVAL_MAX_SAMPLES cap on number of test samples (0 = all)
 
 Usage:
-  python -m scripts.eval_global_vae_translation --cfg configs/config_mixed_stage1_vae_global_wo_mesh_lr1e-4.yaml
+  python -m scripts.eval_global_vae_translation --cfg configs/config_global_vae_beat2amass.yaml
 """
 
 import json
