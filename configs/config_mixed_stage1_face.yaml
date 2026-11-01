@@ -35,7 +35,7 @@ TRAIN:
 
 # Evaluating Configuration
 EVAL:
-  BATCH_SIZE: 128 # Evaluating Batch size
+  BATCH_SIZE: 1 # Evaluating Batch size
   SPLIT: test
 
 TEST:
