@@ -38,6 +38,9 @@ def getCheckpointCallback(cfg, logger=None, **kwargs):
         "Diversity": "Metrics/Diversity",
         "MM dist": "Metrics/Matching_score",
         "Accuracy": "Metrics/accuracy",
+        "LVE": "Metrics/LVE",
+        "MOD": "Metrics/MOD",
+        "FDD": "Metrics/FFD",
     }
     callbacks.append(
         progressLogger(logger,metric_monitor=metric_monitor,log_every_n_steps=1))
